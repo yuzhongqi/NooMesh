@@ -43,15 +43,19 @@ def is_empty_tool_milestone(event: Dict[str, Any]) -> bool:
 
 
 def record_tool_trace(store: Store, workspace: str, task_run: str,
-                      tool_name: str, result_type: str, timestamp: Any) -> str:
+                      tool_name: str, result_type: str, timestamp: Any,
+                      detail: str = "") -> str:
     load_policy(store, workspace)
     key = privacy_key(store)
     safe_tool = sanitize(str(tool_name)[:200], key)[0]
     safe_result = sanitize(str(result_type)[:100], key)[0]
+    safe_detail = sanitize(str(detail)[:240], key)[0] if detail else ""
     trace_id = digest(canonical([task_run, timestamp, safe_tool, safe_result]).encode())
     with store.transaction():
-        store.db.execute("INSERT OR IGNORE INTO tool_traces VALUES (?,?,?,?,?)",
-                         (trace_id, task_run, safe_tool, safe_result, now()))
+        store.db.execute(
+            "INSERT OR IGNORE INTO tool_traces (id,task_run,tool,result_type,created_at,detail) "
+            "VALUES (?,?,?,?,?,?)",
+            (trace_id, task_run, safe_tool, safe_result, now(), safe_detail))
     return trace_id
 
 
@@ -399,28 +403,67 @@ def search(store: Store, cwd: Path, query: str, session: str,
             continue
         reuse = "CONDITIONS_UNKNOWN"
         reason = "Current environment not supplied; historical scoped knowledge only."
+        drift = []
         try:
             store.current_valid(claim, snapshot, actual if actual is not None else spec["conditions"])
+            drift = store.verify(spec).get("anchor_drift", [])
         except (RuntimeErrorBase, OSError, ValueError) as exc:
             reuse, reason = "BLOCKED", str(exc)
         else:
             if actual is not None:
                 reuse, reason = "APPLICABLE", "Recorded conditions match supplied conditions."
+            if drift:
+                reuse = "SOFT_DRIFT"
+                reason = "File SHA256 drifted; declared anchor symbols still match."
         conflict = store.db.execute(
             "SELECT 1 FROM knowledge_relations r JOIN milestones m ON m.id=r.target "
             "WHERE m.claim_id=? AND r.relation IN ('contradicts','supersedes') LIMIT 1",
             (claim_id,)).fetchone()
         if conflict:
             reuse, reason = "BLOCKED", "Related conflicting/superseding candidate needs reconciliation."
-        candidates.append((score, {"id": claim_id, "kind": "published", "summary": spec["statement"],
-                                   "memory": assess_memory(store, workspace, "claim", claim_id, actual=actual),
-                                   "version": claim["version"],
-                                   "title": spec.get("provenance", {}).get("title", spec["task_type"]),
-                                   "conditions": spec["conditions"],
-                                   "provenance": {key: spec.get("provenance", {}).get(key)
-                                                  for key in ("kind", "session", "task", "validated_at")},
-                                   "reuse": reuse, "reason": reason,
-                                   "evidence_ids": sorted({c["evidence_id"] for c in spec["checks"]})}))
+        card = {"id": claim_id, "kind": "published", "summary": spec["statement"],
+                "memory": assess_memory(store, workspace, "claim", claim_id, actual=actual),
+                "version": claim["version"],
+                "title": spec.get("provenance", {}).get("title", spec["task_type"]),
+                "conditions": spec["conditions"],
+                "provenance": {key: spec.get("provenance", {}).get(key)
+                               for key in ("kind", "session", "task", "validated_at")},
+                "reuse": reuse, "reason": reason,
+                "evidence_ids": sorted({c["evidence_id"] for c in spec["checks"]})}
+        if drift:
+            card["anchor_drift"] = drift
+        candidates.append((score, card))
+    from .memos import verify_memo_live
+    for row in store.db.execute("SELECT * FROM memos WHERE workspace=? ORDER BY id", (workspace,)):
+        spec = json.loads(row["body"])
+        symbol_text = " ".join(
+            sym for anchor_item in spec["verification"]["anchors"]
+            for sym in anchor_item.get("symbols", []))
+        tag_text = " ".join(spec.get("tags", []))
+        score = len(terms & tokenize(" ".join((spec["title"], spec["when"], spec["rule"],
+                                               spec["trap"], tag_text, symbol_text))))
+        if score == 0:
+            continue
+        reuse, reason, drift = "APPLICABLE", "Source/symbol anchors verified on current checkout.", []
+        try:
+            ver = verify_memo_live(store, workspace, row["id"])
+            drift = ver["anchor_drift"]
+            if drift:
+                reuse = "SOFT_DRIFT"
+                reason = "File SHA256 drifted; declared anchor symbols still match."
+        except (RuntimeErrorBase, OSError, ValueError) as exc:
+            reuse, reason = "BLOCKED", str(exc)
+        memo_card = {
+            "id": row["id"], "kind": "memo", "memo_kind": spec["kind"],
+            "title": spec["title"], "when": spec["when"],
+            "summary": spec["rule"], "trap": spec["trap"],
+            "verification": spec["verification"], "version": row["version"],
+            "memory": assess_memory(store, workspace, "memo", row["id"]),
+            "reuse": reuse, "reason": reason,
+        }
+        if drift:
+            memo_card["anchor_drift"] = drift
+        candidates.append((score, memo_card))
     for row in store.db.execute("SELECT m.* FROM milestones m JOIN task_runs t ON t.id=m.task_run "
                                "WHERE t.workspace=? AND m.state!='PUBLISHED'", (workspace,)):
         body = json.loads(row["body"])
@@ -432,9 +475,17 @@ def search(store: Store, cwd: Path, query: str, session: str,
                                        "summary": canonical(body["observation"])[:1500],
                                        "reuse": row["state"], "reason": row["reason"],
                                        "conditions": body["conditions"]}))
-    candidates.sort(key=lambda item: (-item[0], item[1]["kind"] != "published",
-                    -min(3, item[1].get("memory", {}).get("usage", {}).get("counts", {}).get("verified_success", 0)),
-                    item[1]["id"]))
+    def _search_rank(entry):
+        score, card = entry
+        authoritative = card["kind"] in ("published", "memo")
+        reuse = card.get("reuse")
+        tier = (0 if authoritative and reuse in ("APPLICABLE", "CONDITIONS_UNKNOWN")
+                else 1 if authoritative and reuse == "SOFT_DRIFT"
+                else 2 if authoritative
+                else 3)
+        successes = card.get("memory", {}).get("usage", {}).get("counts", {}).get("verified_success", 0)
+        return (tier, -score, -min(3, successes), card["id"])
+    candidates.sort(key=_search_rank)
     selected = []
     result = {"schema": "llr.search.v1", "workspace": workspace, "state_home": str(store.home),
               "revision": store.revision(), "matches": selected, "omitted": 0,
@@ -457,6 +508,9 @@ def search(store: Store, cwd: Path, query: str, session: str,
         for item in selected:
             if item["kind"] == "published":
                 record_usage(store, workspace, "claim", item["id"], item["version"],
+                             "retrieved", session, "search:" + digest(canonical(receipt).encode()))
+            elif item["kind"] == "memo":
+                record_usage(store, workspace, "memo", item["id"], item["version"],
                              "retrieved", session, "search:" + digest(canonical(receipt).encode()))
     return result
 
@@ -674,6 +728,8 @@ def forget_workspace(store: Store, workspace: str, approve: bool) -> Dict[str, A
         store.db.execute("DELETE FROM solution_runs WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM solution_versions WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM solutions WHERE workspace=?", (workspace,))
+        store.db.execute("DELETE FROM memo_versions WHERE workspace=?", (workspace,))
+        store.db.execute("DELETE FROM memos WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM themes WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM preferences WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM memory_events WHERE workspace=?", (workspace,))
@@ -739,13 +795,15 @@ def prune_noise(store: Store, approve: bool, vacuum: bool = False) -> Dict[str, 
             tool = str(ops[0].get("tool", "unknown"))[:200] if isinstance(ops[0], dict) else "unknown"
             result_type = str(body.get("observation", {}).get("tool_transport_result", "unknown"))[:100]
             removable.append(row["id"])
-            traces.append((row["id"], row["task_run"], tool, result_type, row["updated_at"]))
+            traces.append((row["id"], row["task_run"], tool, result_type, row["updated_at"], ""))
     for offset in range(0, len(removable), 500):
         batch_ids = removable[offset:offset + 500]
         batch_traces = traces[offset:offset + 500]
         placeholders = ",".join("?" for _ in batch_ids)
         with store.transaction():
-            store.db.executemany("INSERT OR IGNORE INTO tool_traces VALUES (?,?,?,?,?)", batch_traces)
+            store.db.executemany(
+                "INSERT OR IGNORE INTO tool_traces (id,task_run,tool,result_type,created_at,detail) "
+                "VALUES (?,?,?,?,?,?)", batch_traces)
             store.db.execute("DELETE FROM milestones WHERE id IN (" + placeholders + ")", batch_ids)
     with store.transaction():
         views_before = store.db.execute("SELECT count(*) FROM context_views").fetchone()[0]

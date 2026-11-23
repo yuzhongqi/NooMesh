@@ -22,7 +22,9 @@ again.
 | **Shared memory across sessions** | CLI, MCP and supported client hooks connect to one on-demand local Host and private data store. |
 | **Automatic capture of verified work** | Preauthorized validators save scoped observations and evidence as part of execution, without an extra "save this" prompt. Ordinary tool output is isolated in lightweight `tool_traces` rather than polluting candidate memory. |
 | **Reusable solution memos** | Versioned prerequisites (P), bounded procedures (R), and outcome assertions (Q), with explicit parameter and branch coverage. |
-| **Progressive recall & compact session index** | Inject a `<= 1024` byte `llr.session_index.v1` L0 header at `sessionStart` (gated against unrelated prompts in monorepo alias roots), rank L2 by epistemic tier (`solution > claim > BLOCKED > legacy > candidate`), and expand details on demand. |
+| **Closed-loop Rule & Trap Memos** | Source-verified engineering rules and pitfall warnings (`When` + `Rule` + `Trap` + `Verification` with resilient symbol anchors), without fake runtime artifact hashes. |
+| **Progressive recall & compact session index** | Inject a `<= 1024` byte `llr.session_index.v1` L0 header at `sessionStart` (gated against unrelated prompts in monorepo alias roots), rank L2 by epistemic tier (`solution > claim/memo > SOFT_DRIFT > BLOCKED > legacy > candidate`), and expand details on demand. |
+| **Deterministic offline `dream-pass`** | Re-anchor drifted source/symbol rules without model calls, audit sharded L1 themes for dangling links and bloat, and surface sanitized `fail -> pass` debugging turnarounds. |
 | **Local-first execution** | Matching verified contracts execute deterministically. Supported readonly pre-model hooks can return a local result without another model inference. |
 | **Bounded learning missions** | Explicitly approve source-inspection and revalidation queues with checkpoints, deadlines, permissions and budgets. Model work requires a separately verified cost gateway. |
 | **Private, inspectable knowledge** | Generate readable local HTML and matching JSON, inspect provenance, detect conflicts and drift, and delete workspace knowledge. |
@@ -171,9 +173,55 @@ llr export-portal --workspace sample/android --output /private/knowledge-view/ne
   bytes injected, recorded in `llr doctor` as `context_injected: false`,
   `gated: "alias_irrelevant"`).
 - **Epistemic L2 tiering & conversational stopword filtering:** `context --level 2`
-  orders matches by `usable solution > usable claim > BLOCKED safety warning >
-  legacy > candidate` before lexical score and bounded reuse count, and strips
-  high-frequency English/Chinese conversational filler before bigram matching.
+  orders matches by `usable solution > usable claim/memo > SOFT_DRIFT > BLOCKED
+  safety warning > legacy > candidate` before lexical score and bounded reuse
+  count, and strips high-frequency English/Chinese conversational filler before
+  bigram matching.
+
+### Resilient symbol anchors, closed-loop Rule/Trap Memos and offline `dream-pass`
+
+- **Symbol-backed source anchors (`SOFT_DRIFT` vs `BLOCKED`):** Source anchors on
+  both `claims` and `memos` may declare `symbols` (`1..16` exact class/function
+  signatures verified in the workspace file on publication):
+  ```sh
+  llr anchor sample/android src/HostConfigProvider.kt \
+    --symbol "class HostConfigProvider" \
+    --symbol "fun observeInvalidation"
+  ```
+  If an unrelated edit changes the file's full-file SHA-256 while all declared
+  symbols remain intact, retrieval marks `reuse: "SOFT_DRIFT"` (usable with an
+  anchor-drift notice) instead of falsely blocking the rule. Deleting or renaming
+  any declared symbol immediately flips `reuse` to `"BLOCKED"`. Anchors without
+  `symbols` keep strict full-file SHA-256 blocking.
+- **Closed-loop `Rule / Trap Memos` ([memo.v1.schema.json](schemas/memo.v1.schema.json)):**
+  Engineering boundaries and debugging pitfalls that have no single APK
+  `artifact_sha256` use `llr.memo.v1` (`when`, `rule`, `trap`, and live
+  source/symbol `verification`):
+  ```sh
+  llr memo-propose /private/memo.json --expected-version 0 --approve
+  llr memo-invalidate memo-id --workspace sample/android --version 1 \
+    --state stale --reason "Superseded by new module boundary" --approve
+  ```
+  Memos use the 30-day `source` freshness policy, appear across `search`,
+  `context` (`L0`–`L3`), `catalog`, and `export-portal`, and are removed cleanly
+  by `forget-workspace`.
+- **Sharded L1 Theme concurrency & anti-bloat checks:** `define-theme` supports
+  optimistic `--expected-version` (preventing concurrent shard overwrites) and
+  `--strict-links` (rejecting dangling member IDs), and flags `bloat_warning`
+  when a theme shard grows larger than its members' anchored source files.
+- **Deterministic offline consolidation (`llr dream-pass` & MCP `local_learning_dream`):**
+  ```sh
+  llr dream-pass --workspace sample/android
+  llr dream-pass --workspace sample/android --apply --approve
+  ```
+  Dry-run (`model_calls: 0`, also exposed read-only via MCP `local_learning_dream`)
+  reports symbol-valid `reanchorable` items, `broken_anchors`, L1 `theme_repairs`
+  (removing dead links or remapping `claim:<id>` to `memo:<ws>:<id>`),
+  `bloat_warnings`, unmapped verified nodes, and sanitized `fail -> pass`
+  `turnaround_episodes` captured in `tool_traces`. With `--apply --approve`, it
+  transactionally refreshes verified file SHA-256s, renews source verification
+  timestamps, and repairs theme shards—while keeping strict runtime claims gated
+  on real App revalidation.
 
 These checks are wired into claim recall/search, progressive context,
 solution route/execute, dependency checks and context refresh. A pinned old view
@@ -444,10 +492,13 @@ llr solution-execute solution-id --workspace sample/android --session new-sessio
 自动编译 P/R/Q **候选**；它不会因观察 PASS 就被标成 verified solution。
 只读新参数 trial 和新的操作授权也必须区分。
 
-### 分层共享记忆
+### 分层共享记忆与闭环规则 Memo
 
 ```sh
-llr define-theme /private/theme.json --workspace sample/android --approve
+llr anchor sample/android src/HostConfigProvider.kt --symbol "class HostConfigProvider"
+llr memo-propose /private/memo.json --expected-version 0 --approve
+llr define-theme /private/theme.json --workspace sample/android --expected-version 0 --strict-links --approve
+llr dream-pass --workspace sample/android --apply --approve
 llr context --cwd /absolute/project --query "android" --session S --level 0
 llr context --cwd /absolute/project --query "startup" --session S --level 1
 llr context --cwd /absolute/project --query "actual task" --session S --level 2
@@ -457,11 +508,17 @@ llr context-refresh --session S
 ```
 
 L0 只给目录（`sessionStart` 自动注入精简版 `llr.session_index.v1`，严格 `<= 1024` UTF-8 bytes），
-L1 给主题关键点与有限成员，L2 按认知可信度分档（可用 `solution` > 可用 `claim` > `BLOCKED` 风险提示 >
-`legacy` > `candidate`）返回任务候选及完整条件，
+L1 给分片主题关键点与有限成员（支持 `--expected-version` 乐观锁、`--strict-links` 死链拦截与膨胀比告警），
+L2 按认知可信度分档（可用 `solution` > 可用 `claim`/`memo` > 符号仍在但文件局部改动的 `SOFT_DRIFT` >
+`BLOCKED` 风险提示 > `legacy` > `candidate`）返回任务候选及完整条件，
 L3 按完整字段展开。`context` 默认 6000 UTF-8 bytes，最大 12000；返回遗漏数和 cursor。
 单个必要字段超过预算时显式 `ITEM_TOO_LARGE`，不截掉条件保留结论。
 本地执行器读取完整 contract，不凭摘要执行。
+
+`llr.memo.v1`（[memo.v1.schema.json](schemas/memo.v1.schema.json)）为架构边界与排障经验提供一等公民的
+**`When + Rule + Trap + Verification（符号锚点）`** 闭环结构；`llr dream-pass`（及只读 MCP
+`local_learning_dream`）在不调用任何模型的前提下离线复核符号锚点、修补主题断链并汇总 `fail -> pass`
+排障转折线索。
 
 主题别名、成员和一跳关系属于私人项目配置，不把业务关键词写入引擎。
 索引和 summaries 来自一个权威存储（`context_views` 自动限制未引用历史快照数量）；
@@ -471,7 +528,7 @@ snapshot 固定 revision，任务边界 refresh。
 ### 客户端关系与本地优先
 
 既有 MCP 增加：
-`local_experience_context`、`local_experience_route`、`local_experience_execute`。
+`local_experience_context`、`local_experience_route`、`local_experience_execute`、`local_learning_dream`。
 普通 task/验证事件继续使用既有 API，不建立平行知识库。
 
 `sessionStart` hook 仅注入 `<= 1024 UTF-8 bytes` 的 `llr.session_index.v1` L0 极简索引头

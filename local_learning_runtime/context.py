@@ -15,42 +15,94 @@ PLATFORM_ANCHORS = {
     "android": re.compile(r"\b(android|apk|adb|gradle|gradlew|kotlin|compose|logcat|espresso|jetpack)\b|安卓", re.I),
     "ios": re.compile(r"\b(ios|xcode|swift|xcodeproj|xcworkspace|uitest|cocoapods)\b|苹果", re.I),
 }
-DERIVED_THEME_IDS = {"claim", "solution", "legacy", "candidate"}
+DERIVED_THEME_IDS = {"claim", "solution", "memo", "legacy", "candidate"}
 
 
 def kind_tier(card: Dict[str, Any]) -> int:
     kind = card["kind"]
-    blocked = card.get("reuse") == "BLOCKED"
-    if kind == "solution":
-        return 2 if blocked else 0
-    if kind == "claim":
-        return 2 if blocked else 1
-    if kind == "legacy":
+    reuse = card.get("reuse")
+    if reuse == "BLOCKED":
         return 3
-    return 4
+    if kind == "solution":
+        return 0
+    if kind in ("claim", "memo"):
+        return 2 if reuse == "SOFT_DRIFT" else 1
+    if kind == "legacy":
+        return 4
+    return 5
 
 
-def define_theme(store: Store, workspace: str, spec: Dict[str, Any], approve: bool) -> Dict[str, Any]:
+def _theme_anchor_bytes(store: Store, workspace: str, members: List[str]) -> int:
+    root = Path(store.workspace(workspace)["root"])
+    paths = set()
+    snapshot = store.snapshot()
+    for member in members:
+        if member.startswith("claim:"):
+            claim = snapshot.get(member.split(":", 1)[1])
+            if claim and claim["spec"]["workspace"] == workspace:
+                paths.update(a["path"] for a in claim["spec"]["anchors"])
+        elif member.startswith("memo:" + workspace + ":"):
+            memo_id = member[len("memo:" + workspace + ":"):]
+            row = store.db.execute("SELECT body FROM memos WHERE workspace=? AND id=?",
+                                   (workspace, memo_id)).fetchone()
+            if row:
+                paths.update(a["path"] for a in json.loads(row[0])["verification"]["anchors"])
+    total = 0
+    for rel in paths:
+        candidate = (root / rel).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError:
+            continue
+        if candidate.is_file():
+            total += candidate.stat().st_size
+    return total
+
+
+def define_theme(store: Store, workspace: str, spec: Dict[str, Any], approve: bool,
+                 expected_version: Optional[int] = None,
+                 strict_links: bool = False) -> Dict[str, Any]:
     require(approve, "Explicit approval required to change a theme router")
     store.workspace(workspace)
-    object_fields(spec, {"id", "title", "summary", "aliases", "members", "related", "gaps"})
+    object_fields(spec, {"id", "title", "summary", "aliases", "members", "related", "gaps"}, {"version"})
     identifier(spec["id"], "Theme")
+    require(spec["id"] not in DERIVED_THEME_IDS, "Theme ID collides with a reserved derived bucket")
     for field in ("aliases", "members", "related", "gaps"):
         require(isinstance(spec[field], list) and len(spec[field]) <= 32, "Theme field exceeds limit")
+    if strict_links and spec["members"]:
+        view = build_view(store)
+        valid_nodes = {k for k, v in view["nodes"].items() if v["workspace"] == workspace}
+        missing = [m for m in spec["members"] if m not in valid_nodes]
+        require(not missing, "Theme references missing workspace nodes: " + ", ".join(missing[:4]))
     require(len(canonical(spec).encode()) <= 12_000, "Theme exceeds 12000 bytes")
     from .learning import privacy_key
     from .privacy import sanitize
     safe, redactions = sanitize(spec, privacy_key(store))
     require(not redactions, "Theme contains private literals; minimize before routing")
     with store.transaction():
+        old = store.db.execute("SELECT body FROM themes WHERE workspace=? AND id=?",
+                               (workspace, spec["id"])).fetchone()
+        old_version = (json.loads(old[0]).get("version", 1) if old else 0)
+        if expected_version is not None:
+            require(type(expected_version) is int and expected_version >= 0, "Invalid expected theme version")
+            require(old_version == expected_version, "Theme version conflict; reload before editing shard")
+            safe = dict(safe, version=expected_version + 1)
+        elif old_version > 0 and "version" not in safe:
+            safe = dict(safe, version=old_version + 1)
         store.db.execute("INSERT INTO themes VALUES (?,?,?) ON CONFLICT(workspace,id) "
                          "DO UPDATE SET body=excluded.body", (workspace, spec["id"], canonical(safe)))
-    return {"status": "THEME_REGISTERED", "theme": spec["id"]}
+    source_bytes = _theme_anchor_bytes(store, workspace, safe["members"])
+    theme_bytes = len(canonical(safe).encode())
+    return {"status": "THEME_REGISTERED", "theme": spec["id"],
+            "version": safe.get("version", 1),
+            "bloat_warning": bool(source_bytes > 0 and theme_bytes > source_bytes)}
 
 
 def knowledge_revision(store: Store) -> str:
     solutions = [list(row) for row in store.db.execute(
         "SELECT workspace,id,version,lifecycle,fingerprint FROM solutions ORDER BY workspace,id")]
+    memos = [list(row) for row in store.db.execute(
+        "SELECT workspace,id,version,lifecycle,fingerprint FROM memos ORDER BY workspace,id")]
     themes = [list(row) for row in store.db.execute("SELECT * FROM themes ORDER BY workspace,id")]
     legacy = [list(row) for row in store.db.execute(
         "SELECT id,workspace,source_sha256 FROM legacy_intake ORDER BY id")]
@@ -65,7 +117,8 @@ def knowledge_revision(store: Store) -> str:
         "ORDER BY workspace,solution,version,parameters_sha")]
     policies = [list(row) for row in store.db.execute(
         "SELECT * FROM memory_policies ORDER BY workspace,kind,subject")]
-    return digest(canonical([store.revision(), solutions, themes, legacy, milestones, preferences, cases, policies]).encode())
+    return digest(canonical([store.revision(), solutions, memos, themes, legacy,
+                             milestones, preferences, cases, policies]).encode())
 
 
 def build_view(store: Store) -> Dict[str, Any]:
@@ -96,6 +149,18 @@ def build_view(store: Store) -> Dict[str, Any]:
                 "conditions": spec["preconditions"], "verified_cases": cases, "status": row["lifecycle"],
                 "detail": {"spec": spec, "version": row["version"], "lifecycle": row["lifecycle"],
                            "fingerprint": row["fingerprint"]}}
+        for row in store.db.execute("SELECT * FROM memos ORDER BY workspace,id"):
+            spec = json.loads(row["body"])
+            node_id = "memo:" + row["workspace"] + ":" + row["id"]
+            nodes[node_id] = {
+                "id": node_id, "workspace": row["workspace"], "kind": "memo",
+                "memo_kind": spec["kind"], "title": spec["title"],
+                "summary": spec["rule"] + " | Trap: " + spec["trap"],
+                "when": spec["when"], "rule": spec["rule"], "trap": spec["trap"],
+                "conditions": {"when": spec["when"], "method": spec["verification"]["method"]},
+                "status": row["lifecycle"],
+                "detail": {"spec": spec, "version": row["version"], "lifecycle": row["lifecycle"],
+                           "fingerprint": row["fingerprint"]}}
         for row in store.db.execute("SELECT * FROM legacy_intake ORDER BY id"):
             record = json.loads(row["body"])
             source = record["source_node"]
@@ -122,7 +187,8 @@ def build_view(store: Store) -> Dict[str, Any]:
                 json.loads(row["body"]), workspace=row["workspace"])
         for workspace in [row["id"] for row in store.db.execute("SELECT id FROM workspaces")]:
             for kind, title in (("claim", "运行观察"), ("solution", "解决流程"),
-                                ("legacy", "历史线索"), ("candidate", "待验证记录")):
+                                ("memo", "规则与避坑"), ("legacy", "历史线索"),
+                                ("candidate", "待验证记录")):
                 members = [node_id for node_id, node in nodes.items()
                            if node["workspace"] == workspace and node["kind"] == kind]
                 themes.setdefault(workspace + ":" + kind, {
@@ -211,14 +277,28 @@ def packet(store: Store, cwd: Path, query: str, session: str, level: int = 2,
                 card = {key: value for key, value in item.items() if key != "detail"}
                 card["reuse"] = ("CONDITIONS_UNKNOWN" if item["kind"] == "claim"
                                  else "PRECONDITIONS_REQUIRED" if item["kind"] == "solution"
+                                 else "APPLICABLE" if item["kind"] == "memo"
                                  else item["status"])
                 if item["kind"] == "claim":
                     try:
                         store.current_valid(item["detail"], store.snapshot(),
                                             item["detail"]["spec"]["conditions"])
+                        drift = store.verify(item["detail"]["spec"]).get("anchor_drift", [])
+                        if drift:
+                            card["reuse"] = "SOFT_DRIFT"
+                            card["anchor_drift"] = drift
                     except (RuntimeErrorBase, OSError, ValueError) as exc:
                         card["reuse"], card["reason"] = "BLOCKED", str(exc)
-                if item["kind"] in ("claim", "solution"):
+                elif item["kind"] == "memo":
+                    from .memos import verify_memo_live
+                    try:
+                        ver = verify_memo_live(store, workspace, item["detail"]["spec"]["id"])
+                        if ver["anchor_drift"]:
+                            card["reuse"] = "SOFT_DRIFT"
+                            card["anchor_drift"] = ver["anchor_drift"]
+                    except (RuntimeErrorBase, OSError, ValueError) as exc:
+                        card["reuse"], card["reason"] = "BLOCKED", str(exc)
+                if item["kind"] in ("claim", "solution", "memo"):
                     detail = item["detail"]
                     subject = detail["spec"]["id"]
                     health = assess(store, workspace, item["kind"], subject)
@@ -235,7 +315,7 @@ def packet(store: Store, cwd: Path, query: str, session: str, level: int = 2,
         def priority(item):
             node_detail = workspace_nodes[item[1]]["detail"]
             kind = workspace_nodes[item[1]]["kind"]
-            if kind in ("claim", "solution"):
+            if kind in ("claim", "solution", "memo"):
                 from .lifecycle import usage
                 successes = usage(store, workspace, kind, node_detail["spec"]["id"],
                                   node_detail["version"])["counts"]["verified_success"]
@@ -249,15 +329,13 @@ def packet(store: Store, cwd: Path, query: str, session: str, level: int = 2,
         item = workspace_nodes[node]
         # Full conditions and scope remain together. Only evidence references are returned here.
         detail = item["detail"]
-        if item["kind"] == "solution":
-            parts = [{"section": name, "value": value} for name, value in detail["spec"].items()]
-        elif item["kind"] == "claim":
+        if item["kind"] in ("solution", "claim", "memo"):
             parts = [{"section": name, "value": value} for name, value in detail["spec"].items()]
         else:
             parts = [{"section": name, "value": value} for name, value in detail.items()]
         candidates = [{"id": node, "title": item["title"], "status": item["status"],
                        "conditions": item["conditions"], "detail": part} for part in parts]
-        if item["kind"] in ("claim", "solution"):
+        if item["kind"] in ("claim", "solution", "memo"):
             health = assess(store, workspace, item["kind"], detail["spec"]["id"])
             if detail["version"] != memory_reference(store, workspace, item["kind"], detail["spec"]["id"])["version"]:
                 health["status"], health["reasons"] = "BLOCKED", ["Pinned version is no longer current"]
@@ -286,7 +364,7 @@ def packet(store: Store, cwd: Path, query: str, session: str, level: int = 2,
             store.db.execute("INSERT OR IGNORE INTO context_reads VALUES (?,?,?,?)",
                              (session, workspace, view["revision"], item["id"]))
             source_node = workspace_nodes.get(item["id"])
-            if source_node and source_node["kind"] in ("claim", "solution"):
+            if source_node and source_node["kind"] in ("claim", "solution", "memo"):
                 detail = source_node["detail"]
                 record_usage(store, workspace, source_node["kind"], detail["spec"]["id"],
                              detail["version"], "expanded" if level == 3 else "retrieved", session,
@@ -332,9 +410,14 @@ def is_workspace_relevant(store: Store, workspace: str, platform: str, prompt: s
                 w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}",
                                               theme["title"] + " " + " ".join(theme["aliases"])))
     for item in view["nodes"].values():
-        if item["workspace"] == workspace and item["kind"] in ("solution", "claim"):
+        if item["workspace"] == workspace and item["kind"] in ("solution", "claim", "memo"):
             known_identifiers.update(
                 w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", item["title"]))
+            if item["kind"] == "memo":
+                for anchor_item in item["detail"]["spec"]["verification"]["anchors"]:
+                    for sym in anchor_item.get("symbols", []):
+                        known_identifiers.update(
+                            w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", sym))
     return bool(specific_words & known_identifiers)
 
 
@@ -371,14 +454,24 @@ def session_index(store: Store, cwd: Path, query: str, session: str,
                     continue
                 reuse = ("CONDITIONS_UNKNOWN" if item["kind"] == "claim"
                          else "PRECONDITIONS_REQUIRED" if item["kind"] == "solution"
+                         else "APPLICABLE" if item["kind"] == "memo"
                          else item["status"])
                 if item["kind"] == "claim":
                     try:
                         store.current_valid(item["detail"], store.snapshot(),
                                             item["detail"]["spec"]["conditions"])
+                        if store.verify(item["detail"]["spec"]).get("anchor_drift"):
+                            reuse = "SOFT_DRIFT"
                     except (RuntimeErrorBase, OSError, ValueError):
                         reuse = "BLOCKED"
-                if item["kind"] in ("claim", "solution"):
+                elif item["kind"] == "memo":
+                    from .memos import verify_memo_live
+                    try:
+                        if verify_memo_live(store, workspace, item["detail"]["spec"]["id"])["anchor_drift"]:
+                            reuse = "SOFT_DRIFT"
+                    except (RuntimeErrorBase, OSError, ValueError):
+                        reuse = "BLOCKED"
+                if item["kind"] in ("claim", "solution", "memo"):
                     detail = item["detail"]
                     health = assess(store, workspace, item["kind"], detail["spec"]["id"])
                     if (detail["version"] != memory_reference(
@@ -392,6 +485,7 @@ def session_index(store: Store, cwd: Path, query: str, session: str,
             top_hits = [entry[1] for entry in matched[:2]]
     counts = {
         "solutions": sum(1 for item in workspace_nodes.values() if item["kind"] == "solution"),
+        "memos": sum(1 for item in workspace_nodes.values() if item["kind"] == "memo"),
         "claims": sum(1 for item in workspace_nodes.values() if item["kind"] == "claim"),
         "themes": len(custom_themes),
         "legacy": sum(1 for item in workspace_nodes.values() if item["kind"] == "legacy"),
@@ -423,7 +517,7 @@ def session_index(store: Store, cwd: Path, query: str, session: str,
             store.db.execute("INSERT OR IGNORE INTO context_reads VALUES (?,?,?,?)",
                              (session, workspace, view["revision"], hit["id"]))
             source_node = workspace_nodes.get(hit["id"])
-            if source_node and source_node["kind"] in ("claim", "solution"):
+            if source_node and source_node["kind"] in ("claim", "solution", "memo"):
                 detail = source_node["detail"]
                 record_usage(store, workspace, source_node["kind"], detail["spec"]["id"],
                              detail["version"], "retrieved", session,
@@ -448,11 +542,17 @@ def refresh_context(store: Store, session: str) -> Dict[str, Any]:
             row["workspace"] + ":" + row["node"])
         if old_node != new_node:
             changed.add(row["node"])
-        if new_node and new_node.get("kind") in ("claim", "solution"):
+        if new_node and new_node.get("kind") in ("claim", "solution", "memo"):
             health = assess(store, row["workspace"], new_node["kind"],
                             new_node["detail"]["spec"]["id"])
             if health["status"] not in ("FRESH", "CONDITIONS_UNKNOWN"):
                 invalidated.append({"id": row["node"], "reason": "Memory " + health["status"]})
+        if new_node and new_node.get("kind") == "memo":
+            from .memos import verify_memo_live
+            try:
+                verify_memo_live(store, row["workspace"], new_node["detail"]["spec"]["id"])
+            except (RuntimeErrorBase, OSError, ValueError) as exc:
+                invalidated.append({"id": row["node"], "reason": str(exc)})
         if new_node and new_node.get("kind") == "solution":
             from .solutions import get_solution, check_preconditions
             try:

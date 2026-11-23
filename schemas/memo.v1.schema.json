@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Closed-loop engineering rule and trap memo",
+  "type": "object",
+  "required": ["schema", "id", "workspace", "kind", "title", "when", "rule", "trap", "verification"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "llr.memo.v1"},
+    "id": {"type": "string"},
+    "workspace": {"type": "string"},
+    "kind": {"enum": ["rule", "trap"]},
+    "title": {"type": "string", "minLength": 1, "maxLength": 240},
+    "when": {"type": "string", "minLength": 1, "maxLength": 500},
+    "rule": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "trap": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "tags": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {"type": "string", "minLength": 1, "maxLength": 64}
+    },
+    "verification": {
+      "type": "object",
+      "required": ["method", "summary", "anchors"],
+      "additionalProperties": false,
+      "properties": {
+        "method": {"enum": ["source_symbol_contract", "test_case", "incident_fix"]},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "anchors": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": ["path", "sha256"],
+            "additionalProperties": false,
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "symbols": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {"type": "string", "minLength": 1, "maxLength": 200}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

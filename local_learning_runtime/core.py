@@ -88,6 +88,45 @@ def file_digest(path: Path) -> str:
     return result.hexdigest()
 
 
+def validate_anchor(anchor: Any) -> None:
+    object_fields(anchor, {"path", "sha256"}, {"symbols"})
+    require(isinstance(anchor["path"], str) and bool(anchor["path"])
+            and not Path(anchor["path"]).is_absolute(),
+            "Anchor must be workspace-relative")
+    require(".." not in Path(anchor["path"]).parts, "Anchor escapes workspace")
+    require(isinstance(anchor["sha256"], str)
+            and SHA256.fullmatch(anchor["sha256"]) is not None, "Invalid anchor SHA256")
+    if "symbols" in anchor:
+        symbols = anchor["symbols"]
+        require(isinstance(symbols, list) and 1 <= len(symbols) <= 16
+                and len(set(symbols)) == len(symbols), "Anchor symbols must be 1-16 unique strings")
+        for sym in symbols:
+            require(isinstance(sym, str) and 1 <= len(sym.strip()) <= 200 and "\x00" not in sym,
+                    "Anchor symbol must be a bounded nonempty string")
+
+
+def verify_anchor(root: Path, anchor: Dict[str, Any], require_exact: bool = False) -> Dict[str, Any]:
+    validate_anchor(anchor)
+    path = workspace_file(root, anchor["path"])
+    current_sha = file_digest(path)
+    symbols = anchor.get("symbols")
+    if symbols:
+        require(path.stat().st_size <= 2 * 1024 * 1024,
+                "Symbol-anchored file exceeds 2 MiB: " + anchor["path"])
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for sym in symbols:
+            require(sym in text, "Anchor symbol missing in " + anchor["path"] + ": " + sym)
+        if current_sha != anchor["sha256"]:
+            require(not require_exact, "Source anchor changed: " + anchor["path"])
+            return {"path": anchor["path"], "status": "SOFT_DRIFT",
+                    "recorded_sha256": anchor["sha256"], "current_sha256": current_sha,
+                    "matched_symbols": len(symbols)}
+        return {"path": anchor["path"], "status": "EXACT",
+                "current_sha256": current_sha, "matched_symbols": len(symbols)}
+    require(current_sha == anchor["sha256"], "Source anchor changed: " + anchor["path"])
+    return {"path": anchor["path"], "status": "EXACT", "current_sha256": current_sha}
+
+
 def require_private_location(path: Path) -> None:
     resolved = path.expanduser().resolve()
     for parent in (resolved,) + tuple(resolved.parents):
@@ -204,8 +243,18 @@ class Store:
                 state TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS tool_traces (
                 id TEXT PRIMARY KEY, task_run TEXT NOT NULL REFERENCES task_runs(id),
-                tool TEXT NOT NULL, result_type TEXT NOT NULL, created_at TEXT NOT NULL);
+                tool TEXT NOT NULL, result_type TEXT NOT NULL, created_at TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '');
             CREATE INDEX IF NOT EXISTS tool_traces_task_run ON tool_traces(task_run);
+            CREATE TABLE IF NOT EXISTS memos (
+                id TEXT NOT NULL, workspace TEXT NOT NULL REFERENCES workspaces(id),
+                version INTEGER NOT NULL, lifecycle TEXT NOT NULL,
+                body TEXT NOT NULL, fingerprint TEXT NOT NULL, updated_at TEXT NOT NULL,
+                PRIMARY KEY(workspace,id));
+            CREATE TABLE IF NOT EXISTS memo_versions (
+                workspace TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL,
+                body TEXT NOT NULL, fingerprint TEXT NOT NULL,
+                PRIMARY KEY(workspace,id,version));
             CREATE TABLE IF NOT EXISTS solutions (
                 id TEXT NOT NULL, workspace TEXT NOT NULL REFERENCES workspaces(id),
                 version INTEGER NOT NULL, lifecycle TEXT NOT NULL,
@@ -257,6 +306,10 @@ class Store:
             CREATE INDEX IF NOT EXISTS memory_events_subject ON memory_events
                 (workspace,kind,subject,version,case_key,occurred_at);
         """)
+        trace_cols = {row["name"] for row in self.db.execute("PRAGMA table_info(tool_traces)")}
+        if "detail" not in trace_cols:
+            self.db.execute("ALTER TABLE tool_traces ADD COLUMN detail TEXT NOT NULL DEFAULT ''")
+            self.db.commit()
 
     def close(self) -> None:
         self.db.close()
@@ -351,9 +404,7 @@ class Store:
         require(isinstance(spec["anchors"], list) and len(spec["anchors"]) <= 32,
                 "Anchors must be a bounded list")
         for anchor in spec["anchors"]:
-            object_fields(anchor, {"path", "sha256"})
-            require(isinstance(anchor["sha256"], str)
-                    and SHA256.fullmatch(anchor["sha256"]) is not None, "Invalid anchor SHA256")
+            validate_anchor(anchor)
         require(isinstance(spec["checks"], list) and 0 < len(spec["checks"]) <= 16,
                 "A claim requires 1-16 local checks")
         require(isinstance(spec["dependencies"], list) and len(spec["dependencies"]) <= 32,
@@ -364,12 +415,13 @@ class Store:
         require(len(set(spec["dependencies"])) == len(spec["dependencies"]),
                 "Duplicate dependencies")
 
-    def verify(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+    def verify(self, spec: Dict[str, Any], require_exact_anchors: bool = False) -> Dict[str, Any]:
         self.validate_spec(spec)
         scope = self.workspace(spec["workspace"])
-        for anchor in spec["anchors"]:
-            path = workspace_file(Path(scope["root"]), anchor["path"])
-            require(file_digest(path) == anchor["sha256"], "Source anchor changed: " + anchor["path"])
+        root = Path(scope["root"])
+        anchor_results = [verify_anchor(root, anchor, require_exact=require_exact_anchors)
+                          for anchor in spec["anchors"]]
+        anchor_drift = [item["path"] for item in anchor_results if item["status"] == "SOFT_DRIFT"]
         results = []
         for check in spec["checks"]:
             require(isinstance(check, dict) and isinstance(check.get("evidence_id"), str),
@@ -382,7 +434,8 @@ class Store:
             passed = check_evidence(check, raw, evidence["media_type"])
             results.append({"kind": check["kind"], "evidence_id": evidence["id"], "passed": passed})
         return {"verdict": "PASS" if all(item["passed"] for item in results) else "FAIL",
-                "checks": results, "meaning": "Declared predicates passed; prose is not mechanically proven"}
+                "checks": results, "anchor_drift": anchor_drift,
+                "meaning": "Declared predicates passed; prose is not mechanically proven"}
 
     def propose(self, spec: Dict[str, Any]) -> Dict[str, Any]:
         self.validate_spec(spec)
@@ -445,7 +498,7 @@ class Store:
             snapshot = self.snapshot()
             old = snapshot.get(spec["id"])
             require((old["version"] if old else 0) == expected_version, "Claim version conflict")
-            verification = self.verify(spec)
+            verification = self.verify(spec, require_exact_anchors=True)
             require(verification["verdict"] == "PASS", "Local checks failed; candidate not accepted")
             versions = {}
             for dependency in spec["dependencies"]:

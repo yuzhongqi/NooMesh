@@ -25,8 +25,11 @@ def parsed(value: Optional[str]) -> Optional[datetime]:
     return timestamp.astimezone(timezone.utc) if timestamp.tzinfo else None
 
 
+SOURCE_PROVENANCE_KINDS = {"code_inference", "source_audit", "engineering_rule"}
+
+
 def reference(store: Store, workspace: str, kind: str, subject: str) -> Dict[str, Any]:
-    require(kind in ("claim", "solution"), "Memory kind must be claim or solution")
+    require(kind in ("claim", "solution", "memo"), "Memory kind must be claim, solution or memo")
     store.workspace(workspace)
     if kind == "claim":
         row = store.db.execute("SELECT body FROM claims WHERE id=?", (subject,)).fetchone()
@@ -46,10 +49,19 @@ def reference(store: Store, workspace: str, kind: str, subject: str) -> Dict[str
             stored_time = parsed(baseline)
             baseline = (min(captured, stored_time).isoformat()
                         if captured and stored_time else None)
-        return {"version": item["version"], "type": "source" if item["spec"].get(
-                "provenance", {}).get("kind") == "code_inference" else "runtime",
+        prov_kind = item["spec"].get("provenance", {}).get("kind")
+        return {"version": item["version"],
+                "type": "source" if prov_kind in SOURCE_PROVENANCE_KINDS else "runtime",
                 "lifecycle": item["lifecycle"], "baseline": baseline,
                 "title": item["spec"].get("provenance", {}).get("title", item["spec"]["task_type"])}
+    if kind == "memo":
+        row = store.db.execute("SELECT * FROM memos WHERE workspace=? AND id=?",
+                               (workspace, subject)).fetchone()
+        require(row is not None, "Published memo not found")
+        spec = json.loads(row["body"])
+        return {"version": row["version"], "type": "source",
+                "lifecycle": row["lifecycle"], "baseline": row["updated_at"],
+                "title": spec["title"]}
     row = store.db.execute("SELECT * FROM solutions WHERE workspace=? AND id=?", (workspace, subject)).fetchone()
     require(row is not None, "Solution not found")
     spec = json.loads(row["body"])
@@ -76,6 +88,8 @@ def configure(store: Store, workspace: str, kind: str, subject: str,
     if kind == "claim":
         claim = json.loads(store.db.execute("SELECT body FROM claims WHERE id=?", (subject,)).fetchone()[0])
         declared = set(claim["spec"]["conditions"])
+    elif kind == "memo":
+        declared = set()
     else:
         solution = json.loads(store.db.execute("SELECT body FROM solutions WHERE workspace=? AND id=?",
                                                (workspace, subject)).fetchone()[0])
@@ -248,6 +262,8 @@ def maintenance(store: Store, workspace: str, limit: int = 50, cursor: int = 0) 
     targets = [("claim", row["id"]) for row in store.db.execute("SELECT id FROM claims")]
     targets += [("solution", row["id"]) for row in store.db.execute(
         "SELECT id FROM solutions WHERE workspace=?", (workspace,))]
+    targets += [("memo", row["id"]) for row in store.db.execute(
+        "SELECT id FROM memos WHERE workspace=?", (workspace,))]
     items = []
     for kind, subject in targets:
         if kind == "claim":
@@ -269,6 +285,9 @@ def maintenance(store: Store, workspace: str, limit: int = 50, cursor: int = 0) 
                 if kind == "claim":
                     claim = store.snapshot()[subject]
                     store.current_valid(claim, store.snapshot(), claim["spec"]["conditions"])
+                elif kind == "memo":
+                    from .memos import verify_memo_live
+                    verify_memo_live(store, workspace, subject)
                 else:
                     from .solutions import get_solution, check_preconditions
                     solution = get_solution(store, workspace, subject)

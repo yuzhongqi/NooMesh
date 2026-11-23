@@ -146,8 +146,16 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
                               "uncertainties": ["A successful tool transport is not an app verification."]}
                 ingest(store, event_body)
             else:
+                failure_detail = ""
+                if result_type == "failure" and isinstance(text, str):
+                    lines = [ln.strip() for ln in text[:16_000].splitlines() if ln.strip()]
+                    diag = next((ln for ln in lines if re.search(
+                        r"error[:\s]|exception|failed|fatal|unresolved reference|assertionerror",
+                        ln, re.I)), lines[0] if lines else "")
+                    failure_detail = diag[:200]
                 record_tool_trace(store, workspace, task_row["id"], str(tool_name),
-                                  str(result_type), payload.get("timestamp"))
+                                  str(result_type), payload.get("timestamp"),
+                                  detail=failure_detail)
     if event in ("agentStop", "sessionEnd", "notify"):
         # End-of-turn is not proof of task success. Preserve completed milestones separately.
         with store.transaction():

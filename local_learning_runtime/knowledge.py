@@ -68,11 +68,13 @@ def catalog(store: Store, workspace: str) -> Dict[str, Any]:
             card = json.loads(canonical(claim))
             try:
                 store.current_valid(claim, snapshot, claim["spec"]["conditions"])
+                drift = store.verify(claim["spec"]).get("anchor_drift", [])
             except (RuntimeErrorBase, OSError, ValueError, ET.ParseError) as exc:
                 card["local_integrity"] = {"status": "BLOCKED", "reason": str(exc)}
             else:
                 card["local_integrity"] = {
-                    "status": "PASS",
+                    "status": "SOFT_DRIFT" if drift else "PASS",
+                    "anchor_drift": drift,
                     "notice": "Checks pass under recorded conditions; current environment not attested."}
             claims.append(card)
             card["memory"] = assess(store, workspace, "claim", claim["spec"]["id"])
@@ -94,6 +96,20 @@ def catalog(store: Store, workspace: str) -> Dict[str, Any]:
             "SELECT * FROM solutions WHERE workspace=?", (workspace,))]
         for solution in solutions:
             solution["memory"] = assess(store, workspace, "solution", solution["id"])
+        from .memos import verify_memo_live
+        memos = []
+        for row in store.db.execute("SELECT * FROM memos WHERE workspace=? ORDER BY id", (workspace,)):
+            memo_item = dict(row, body=json.loads(row["body"]))
+            memo_item["memory"] = assess(store, workspace, "memo", row["id"])
+            try:
+                ver = verify_memo_live(store, workspace, row["id"])
+                memo_item["local_integrity"] = {
+                    "status": "SOFT_DRIFT" if ver["anchor_drift"] else "PASS",
+                    "anchor_drift": ver["anchor_drift"],
+                }
+            except (RuntimeErrorBase, OSError, ValueError) as exc:
+                memo_item["local_integrity"] = {"status": "BLOCKED", "reason": str(exc)}
+            memos.append(memo_item)
         learning_missions = [dict(row, body=json.loads(row["body"])) for row in store.db.execute(
             "SELECT * FROM missions WHERE workspace=?", (workspace,))]
         from .learning import status, graph, is_empty_tool_milestone
@@ -110,7 +126,7 @@ def catalog(store: Store, workspace: str) -> Dict[str, Any]:
                 "status": row["state"], "reason": row["reason"], "epistemic_kind": event["kind"]})
     return {"schema": "llr.catalog.v1", "workspace": workspace, "revision": revision,
             "claims": sorted(claims, key=lambda item: item["spec"]["id"]),
-            "legacy": legacy, "candidates": candidates, "questions": questions,
+            "memos": memos, "legacy": legacy, "candidates": candidates, "questions": questions,
             "tasks": tasks, "graph": projection, "solutions": solutions, "missions": learning_missions,
             "maintenance": maintenance(store, workspace)}
 
@@ -139,7 +155,8 @@ def condition_list(values: Dict[str, Any]) -> str:
 
 def published_card(claim: Dict[str, Any], evidence_labels: Dict[str, str]) -> str:
     spec = claim["spec"]
-    passed = claim["local_integrity"]["status"] == "PASS"
+    integrity_status = claim["local_integrity"]["status"]
+    passed = integrity_status in ("PASS", "SOFT_DRIFT")
     title = spec["statement"]
     explanation = "已登记的检查支持下面这条结论。"
     if spec.get("provenance", {}).get("kind") == "runtime_observation":
@@ -159,8 +176,11 @@ def published_card(claim: Dict[str, Any], evidence_labels: Dict[str, str]) -> st
     for evidence_id in dict.fromkeys(check["evidence_id"] for check in spec["checks"]):
         links.append('<a href="#evidence-' + escaped(evidence_id) + '">'
                      + escaped(evidence_labels[evidence_id]) + "</a>")
-    status = "已发布 · 记录条件下检查通过" if passed else "暂停复用 · 需要检查"
-    reason = ("新任务仍需核对当前构建、账户和配置，不能把历史结果当作现在的保证。"
+    status = ("已发布 · 符号锚点有效（文件有局部漂移）" if integrity_status == "SOFT_DRIFT"
+              else "已发布 · 记录条件下检查通过" if passed else "暂停复用 · 需要检查")
+    reason = ("锚定文件有其他行改动，但声明的关键符号仍在；复用时请顺手核对上下文。"
+              if integrity_status == "SOFT_DRIFT"
+              else "新任务仍需核对当前构建、账户和配置，不能把历史结果当作现在的保证。"
               if passed else claim["local_integrity"]["reason"])
     return ('<article class="card"><span class="badge ' + ("pass" if passed else "warn") + '">'
             + status + "</span><h3>" + escaped(title) + "</h3><p>" + escaped(explanation)
@@ -326,6 +346,27 @@ def export_portal(store: Store, workspace: str, output: Path) -> Dict[str, Any]:
     sections.insert(0, '<section id="solutions"><h2>可复用解决流程</h2>'
                     + ("".join(solution_cards) or "<p>尚无完整解决 memo；验证观察不会自动升级为解决流程。</p>")
                     + "</section>")
+    if data.get("memos"):
+        memo_cards = []
+        for memo_item in data["memos"]:
+            spec = memo_item["body"]
+            integrity = memo_item["local_integrity"]["status"]
+            ok = integrity in ("PASS", "SOFT_DRIFT") and memo_item["memory"]["status"] == "FRESH"
+            badge = ("规则闭环 · 符号锚点有效" if ok and integrity == "PASS"
+                     else "规则闭环 · 文件局部漂移（符号仍在）" if ok
+                     else "暂停复用 · 需复核源码锚点")
+            memo_cards.append(
+                '<article class="card"><span class="badge ' + ("pass" if ok else "warn") + '">'
+                + badge + "</span><h3>" + escaped(spec["title"]) + "</h3>"
+                + "<p><strong>触发场景：</strong>" + escaped(spec["when"]) + "</p>"
+                + "<p><strong>核心规则：</strong>" + escaped(spec["rule"]) + "</p>"
+                + '<div class="callout"><strong>踩坑警告（Trap）</strong><p>'
+                + escaped(spec["trap"]) + "</p></div>"
+                + "<p><strong>验证依据：</strong>" + escaped(spec["verification"]["summary"]) + "</p>"
+                + memory_summary(memo_item.get("memory", {}))
+                + technical_details(memo_item) + "</article>")
+        sections.insert(1, '<section id="memos"><h2>工程规则与避坑闭环</h2>'
+                        + "".join(memo_cards) + "</section>")
     sections.append('<section id="maintenance"><h2>知识维护建议</h2><p>'
         + "这里只列建议，不会自动运行 App、调用模型、删除知识或恢复学习。</p>"
         + ("".join('<article class="card"><h3>' + escaped(item["title"]) + "</h3><ul>"

@@ -10,8 +10,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from .core import MAX_EVIDENCE_BYTES, RuntimeErrorBase, Store, file_digest, require, workspace_file
+from .core import (MAX_EVIDENCE_BYTES, RuntimeErrorBase, Store, file_digest,
+                   require, verify_anchor, workspace_file)
 from .devices import android_capture, ios_capture, run_android_recipe
+from .dream import dream_pass
 from .knowledge import catalog, export_portal, import_graph
 from .acceptance import android_acceptance
 from .discovery import discover, register_alias
@@ -21,6 +23,7 @@ from .learning import retry_milestone
 from .clients import (hook, install_copilot, install_codex, install_codex_hooks,
                       codex_notify, setup_client, doctor)
 from .mcp import serve
+from .memos import invalidate_memo, propose_memo
 from .probes import android_node
 from .solutions import propose_solution, execute_solution, route, invalidate_solution
 from .context import packet, define_theme, refresh_context
@@ -44,18 +47,22 @@ def parser() -> argparse.ArgumentParser:
     memory_policy = commands.add_parser("memory-policy")
     memory_policy.add_argument("spec")
     memory_policy.add_argument("--workspace", required=True)
-    memory_policy.add_argument("--kind", choices=["claim", "solution"], required=True)
+    memory_policy.add_argument("--kind", choices=["claim", "solution", "memo"], required=True)
     memory_policy.add_argument("--id", required=True)
     memory_policy.add_argument("--approve", action="store_true")
     memory = commands.add_parser("memory-health")
     memory.add_argument("--workspace", required=True)
-    memory.add_argument("--kind", choices=["claim", "solution"], required=True)
+    memory.add_argument("--kind", choices=["claim", "solution", "memo"], required=True)
     memory.add_argument("--id", required=True)
     memory.add_argument("--case-key")
     maintenance_parser = commands.add_parser("maintenance")
     maintenance_parser.add_argument("--workspace", required=True)
     maintenance_parser.add_argument("--limit", type=int, default=50)
     maintenance_parser.add_argument("--cursor", type=int, default=0)
+    dream_parser = commands.add_parser("dream-pass")
+    dream_parser.add_argument("--workspace", required=True)
+    dream_parser.add_argument("--apply", action="store_true")
+    dream_parser.add_argument("--approve", action="store_true")
     setup = commands.add_parser("setup")
     setup.add_argument("workspace")
     setup.add_argument("--root", type=Path, required=True)
@@ -89,7 +96,21 @@ def parser() -> argparse.ArgumentParser:
     theme = commands.add_parser("define-theme")
     theme.add_argument("spec")
     theme.add_argument("--workspace", required=True)
+    theme.add_argument("--expected-version", type=int)
+    theme.add_argument("--strict-links", action="store_true")
     theme.add_argument("--approve", action="store_true")
+    memo_prop = commands.add_parser("memo-propose")
+    memo_prop.add_argument("spec")
+    memo_prop.add_argument("--expected-version", type=int, required=True)
+    memo_prop.add_argument("--session", default="author")
+    memo_prop.add_argument("--approve", action="store_true")
+    memo_inv = commands.add_parser("memo-invalidate")
+    memo_inv.add_argument("memo")
+    memo_inv.add_argument("--workspace", required=True)
+    memo_inv.add_argument("--version", type=int, required=True)
+    memo_inv.add_argument("--state", choices=["stale", "conflicted", "superseded"], required=True)
+    memo_inv.add_argument("--reason", required=True)
+    memo_inv.add_argument("--approve", action="store_true")
     proposal = commands.add_parser("solution-propose")
     proposal.add_argument("spec")
     proposal.add_argument("--expected-version", type=int, required=True)
@@ -196,6 +217,7 @@ def parser() -> argparse.ArgumentParser:
     anchor = commands.add_parser("anchor")
     anchor.add_argument("workspace")
     anchor.add_argument("path")
+    anchor.add_argument("--symbol", action="append")
     observe = commands.add_parser("observe")
     observe.add_argument("--workspace", required=True)
     observe.add_argument("--event", required=True)
@@ -274,6 +296,8 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         return memory_health(store, args.workspace, args.kind, args.id, args.case_key)
     if args.command == "maintenance":
         return maintenance(store, args.workspace, args.limit, args.cursor)
+    if args.command == "dream-pass":
+        return dream_pass(store, args.workspace, args.apply, args.approve)
     if args.command == "setup":
         return setup_client(store, args.workspace, args.root, args.platform, args.client,
                             args.profile, args.approve, args.local_first_readonly)
@@ -288,7 +312,14 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
     if args.command == "context-refresh":
         return refresh_context(store, args.session)
     if args.command == "define-theme":
-        return define_theme(store, args.workspace, read_json(args.spec), args.approve)
+        return define_theme(store, args.workspace, read_json(args.spec), args.approve,
+                            args.expected_version, args.strict_links)
+    if args.command == "memo-propose":
+        return propose_memo(store, read_json(args.spec), args.expected_version,
+                            args.approve, args.session)
+    if args.command == "memo-invalidate":
+        return invalidate_memo(store, args.workspace, args.memo, args.version,
+                               args.state, args.reason, args.approve)
     if args.command == "solution-propose":
         return propose_solution(store, read_json(args.spec), args.expected_version, args.approve)
     if args.command == "route":
@@ -353,8 +384,13 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         return store.register(args.workspace, args.root, args.platform)
     if args.command == "anchor":
         scope = store.workspace(args.workspace)
-        path = workspace_file(Path(scope["root"]), args.path)
-        return {"path": args.path, "sha256": file_digest(path)}
+        root = Path(scope["root"])
+        path = workspace_file(root, args.path)
+        item = {"path": args.path, "sha256": file_digest(path)}
+        if args.symbol:
+            item["symbols"] = list(dict.fromkeys(args.symbol))
+            verify_anchor(root, item, require_exact=True)
+        return item
     if args.command == "observe":
         require(args.file.stat().st_size <= MAX_EVIDENCE_BYTES, "Evidence too large")
         return store.observe(args.event, args.workspace, read_json(args.conditions),

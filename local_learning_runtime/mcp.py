@@ -9,6 +9,7 @@ from .core import Store, RuntimeErrorBase, canonical, require
 from .learning import search, status, run_registered
 from .discovery import discover
 from .context import packet
+from .dream import dream_pass
 from .solutions import route, execute_solution
 from .lifecycle import maintenance
 from . import __version__
@@ -20,6 +21,12 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"workspace": {"type": "string"},
                      "limit": {"type": "integer", "minimum": 1, "maximum": 200},
                      "cursor": {"type": "integer", "minimum": 0}},
+                     "required": ["workspace"], "additionalProperties": False}},
+    {"name": "local_learning_dream",
+     "description": "Deterministic read-only offline consolidation report: symbol-anchor drift "
+                    "candidates, broken anchors, L1 theme dead-link/bloat checks, and recent "
+                    "fail->pass turnaround episodes. Never calls a model or mutates state.",
+     "inputSchema": {"type": "object", "properties": {"workspace": {"type": "string"}},
                      "required": ["workspace"], "additionalProperties": False}},
     {"name": "local_experience_context",
      "description": "Progressive shared memory: L0 project catalog, L1 theme map, L2 task summaries "
@@ -96,6 +103,8 @@ def respond(store: Store, message: Dict[str, Any]) -> Dict[str, Any]:
                             args.get("conditions"))
         elif params["name"] == "local_learning_maintenance":
             result = maintenance(store, args["workspace"], args.get("limit", 50), args.get("cursor", 0))
+        elif params["name"] == "local_learning_dream":
+            result = dream_pass(store, args["workspace"], apply=False, approve=False)
         elif params["name"] == "local_experience_context":
             result = packet(store, Path(args["cwd"]), args["query"], args["session"],
                             args.get("level", 2), args.get("node"), args.get("revision"),
