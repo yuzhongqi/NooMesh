@@ -104,6 +104,8 @@ def dispatch_request(home: Path, request: Dict[str, Any]) -> Any:
             if args.command == "hook":
                 from .clients import hook
                 return hook(store, args.client, args.event, payload["hook_input"])
+            if args.command == "notify-config" and "webhook_stdin" in payload:
+                args.webhook_value = payload["webhook_stdin"]
             if args.command == "notify":
                 from .clients import codex_notify
                 return codex_notify(store, json.loads(args.payload))
@@ -152,6 +154,8 @@ class AgentServer(socketserver.ThreadingUnixStreamServer):
                     self.working.set()
                     with self.mission_lock:
                         tick(store, row["id"])
+                        from .notifier import maybe_notify_mission
+                        maybe_notify_mission(store, row["id"])
                     self.last_used = time.monotonic()
                 elif time.monotonic() - self.last_used > self.idle_seconds:
                     with self.active_lock:

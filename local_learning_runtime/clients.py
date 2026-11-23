@@ -13,13 +13,15 @@ from .core import Store, canonical, digest, now, require
 from .discovery import discover, infer_platform
 from .learning import (begin_task, ingest, load_policy, privacy_key, record_tool_trace,
                        search, status)
+from .notifier import maybe_notify_turn_end, notifier_status
 from .privacy import sanitize
 from .context import is_workspace_relevant, packet, session_index
 
 
 def _record_receipt(store: Store, client: str, session: str, event: str,
                     workspace: Optional[str], payload: Dict[str, Any],
-                    context_injected: bool, gated: Optional[str] = None) -> Dict[str, Any]:
+                    context_injected: bool, gated: Optional[str] = None,
+                    prompt_summary: str = "") -> Dict[str, Any]:
     safe_receipt: Dict[str, Any] = {
         "state_home": str(store.home), "workspace": workspace,
         "revision": store.revision(), "event": event,
@@ -30,6 +32,8 @@ def _record_receipt(store: Store, client: str, session: str, event: str,
     }
     if gated is not None:
         safe_receipt["gated"] = gated
+    if prompt_summary:
+        safe_receipt["prompt_summary"] = sanitize(prompt_summary[:90], privacy_key(store))[0]
     with store.transaction():
         receipt_id = digest(canonical([client, session, event, payload.get("timestamp"),
                                        payload.get("turn-id"), safe_receipt]).encode())
@@ -61,8 +65,15 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
             candidates = found.get("candidates", [])
             if not any(is_workspace_relevant(store, item["workspace"], item["platform"], prompt_text)
                        for item in candidates):
-                _record_receipt(store, client, session, event, None, payload, False, "alias_irrelevant")
+                _record_receipt(store, client, session, event, None, payload, False,
+                                "alias_irrelevant", prompt_text)
                 return {}
+        if event == "userPromptSubmitted":
+            _record_receipt(store, client, session, event, None, payload, False,
+                            found["status"].lower(), prompt_text)
+        if event in ("agentStop", "notify"):
+            maybe_notify_turn_end(store, client, session, None)
+            _record_receipt(store, client, session, event, None, payload, False)
         if client == "codex-hooks" and event in ("sessionStart", "userPromptSubmitted"):
             return {"hookSpecificOutput": {
                 "hookEventName": "SessionStart" if event == "sessionStart" else "UserPromptSubmit",
@@ -72,7 +83,8 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
     load_policy(store, workspace)
     if (event in ("sessionStart", "userPromptSubmitted") and found.get("via_alias")
             and not is_workspace_relevant(store, workspace, found["platform"], prompt_text)):
-        _record_receipt(store, client, session, event, workspace, payload, False, "alias_irrelevant")
+        _record_receipt(store, client, session, event, workspace, payload, False,
+                        "alias_irrelevant", prompt_text)
         return {}
     if event == "sessionStart":
         context = session_index(store, Path(cwd), prompt_text, session, budget=1024)
@@ -161,7 +173,11 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
         with store.transaction():
             store.db.execute("UPDATE task_runs SET state='AWAITING_EVIDENCE',updated_at=? "
                              "WHERE session=? AND state='in_progress'", (now(), session))
-    safe_receipt = _record_receipt(store, client, session, event, workspace, payload, context is not None)
+        if event in ("agentStop", "notify"):
+            maybe_notify_turn_end(store, client, session, workspace)
+    safe_receipt = _record_receipt(
+        store, client, session, event, workspace, payload, context is not None,
+        prompt_summary=prompt_text if event == "userPromptSubmitted" else "")
     if client == "codex-hooks" and context is not None:
         return {"hookSpecificOutput": {"hookEventName":
                 "SessionStart" if event == "sessionStart" else "UserPromptSubmit",
@@ -339,6 +355,7 @@ def doctor(store: Store) -> Dict[str, Any]:
             "registered_workspaces": [dict(row) for row in store.db.execute("SELECT * FROM workspaces")],
             "auto_dream_source": bool(policy.get("auto_dream_source", False)),
             "dream_interval_seconds": policy.get("dream_interval_seconds", 43200),
+            "teams_notifier": notifier_status(store),
             "recent_handoffs": receipts,
             "client_trust": "Must be verified in the actual client UI; file presence is not invocation.",
             "local_only_default": True, "model_gateway_configured": (store.home / "model-gateway.json").exists(),

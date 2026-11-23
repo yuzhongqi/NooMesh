@@ -24,6 +24,7 @@ from .clients import (hook, install_copilot, install_codex, install_codex_hooks,
                       codex_notify, setup_client, doctor)
 from .mcp import serve
 from .memos import invalidate_memo, propose_memo
+from .notifier import configure_notifier, notifier_status, send_test_notification
 from .probes import android_node
 from .solutions import propose_solution, execute_solution, route, invalidate_solution
 from .context import packet, define_theme, refresh_context
@@ -75,6 +76,20 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("host-status")
     commands.add_parser("host-stop")
     commands.add_parser("doctor")
+    notify_cfg = commands.add_parser("notify-config")
+    notify_cfg.add_argument("--webhook-file", type=Path)
+    notify_cfg.add_argument("--webhook-stdin", action="store_true")
+    notify_cfg.add_argument("--min-duration", type=int)
+    notify_cfg.add_argument("--enable", dest="enabled", action="store_true", default=None)
+    notify_cfg.add_argument("--disable", dest="enabled", action="store_false")
+    notify_cfg.add_argument("--include-unregistered", dest="include_unregistered",
+                            action="store_true", default=None)
+    notify_cfg.add_argument("--registered-only", dest="include_unregistered",
+                            action="store_false")
+    notify_cfg.add_argument("--approve", action="store_true")
+    commands.add_parser("notify-status")
+    notify_test = commands.add_parser("notify-test")
+    notify_test.add_argument("--approve", action="store_true")
     preference = commands.add_parser("preference")
     preference.add_argument("id")
     preference.add_argument("--text", required=True)
@@ -308,6 +323,19 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
                             args.profile, args.approve, args.local_first_readonly)
     if args.command == "doctor":
         return doctor(store)
+    if args.command == "notify-config":
+        url = getattr(args, "webhook_value", None)
+        if url is None and args.webhook_file is not None:
+            require(args.webhook_file.stat().st_size <= 8000, "Webhook file too large")
+            url = args.webhook_file.read_text(encoding="utf-8").strip()
+        if url is None:
+            url = os.environ.get("LLR_TEAMS_WEBHOOK_URL")
+        return configure_notifier(store, args.approve, url, args.min_duration,
+                                  args.enabled, args.include_unregistered)
+    if args.command == "notify-status":
+        return notifier_status(store)
+    if args.command == "notify-test":
+        return send_test_notification(store, args.approve)
     if args.command == "context":
         return packet(store, args.cwd, args.query, args.session, args.level,
                       args.node, args.revision, args.cursor, args.budget)
@@ -467,6 +495,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 raw = sys.stdin.buffer.read(256_001)
                 require(len(raw) <= 256_000, "Hook input too large")
                 payload["hook_input"] = json.loads(raw)
+            elif args.command == "notify-config" and args.webhook_stdin:
+                raw_url = sys.stdin.buffer.read(8001)
+                require(len(raw_url) <= 8000, "Webhook URL input too large")
+                payload["webhook_stdin"] = raw_url.decode("utf-8").strip()
             output = call(args.home, "command", payload)
         print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
         if isinstance(output, dict) and output.get("error"):

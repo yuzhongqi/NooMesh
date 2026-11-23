@@ -227,6 +227,35 @@ llr export-portal --workspace sample/android --output /private/knowledge-view/ne
   recorded in `llr doctor` as `host-idle / autoDreamPass`) right before its
   idle shutdown when no client requests or missions are active.
 
+### Teams Workflows completion notifications (VS Code, Codex & Missions)
+
+Because VS Code Copilot (`agentStop`), Codex (`Stop` / `notify`), and background
+learning missions all converge on the shared local Host, configuring one private
+Microsoft Teams **Workflows** webhook notifies your personal chat (for example
+`Chat with Workflows` or your self-chat `(You)`) across every client:
+
+1. In Microsoft Teams, open **Workflows** (or `...` → **Workflows** inside your
+   self-chat) and pick **"Post to a chat when a webhook request is received"**
+   (or build a 2-step flow: `When a Teams webhook request is received` →
+   `Post message in a chat or channel`), then copy the HTTPS webhook URL.
+2. Save the URL privately via stdin (`0600` `~/.local-learning-runtime/notifier.json`,
+   kept out of shell history and Git) and verify delivery:
+   ```sh
+   pbpaste | llr notify-config --webhook-stdin --min-duration 30 --approve
+   llr notify-test --approve
+   llr notify-status
+   ```
+- **Security & anti-spam guards:** Remote URLs must use `https://` on official
+  Microsoft Workflows / Power Platform / Office domains (`*.logic.azure.com`,
+  `*.api.powerplatform.com`, `*.powerautomate.com`, `*.webhook.office.com`) with
+  redirects refused; SAS query signatures are redacted from `notify-status`,
+  `doctor`, and receipts. Turns shorter than `--min-duration` (default `30s`) are
+  skipped, Codex `Stop` + `notify` events are deduplicated per turn, dispatch runs
+  asynchronously in a detached background process so IDE hooks never block, and
+  cards carry only sanitized metadata (client, workspace, duration, state, and a
+  redacted 90-char summary—never source code or raw transcripts). To pause or
+  re-enable: `llr notify-config --disable --approve` / `--enable --approve`.
+
 These checks are wired into claim recall/search, progressive context,
 solution route/execute, dependency checks and context refresh. A pinned old view
 remains inspectable but cannot pretend to be the currently applicable version.
