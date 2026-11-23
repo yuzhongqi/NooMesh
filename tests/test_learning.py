@@ -91,6 +91,20 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(result["tasks"][0]["milestones"][0]["state"], "CANDIDATE")
         self.assertIsNone(self.store.revision())
 
+    def test_nonpassing_missing_predicates_are_saved_without_publication(self):
+        for outcome in ("FAIL", "PARTIAL", "INCONCLUSIVE"):
+            with self.subTest(outcome=outcome):
+                event = dict(self.event, milestone=outcome.lower(), outcome=outcome,
+                             observation={})
+                result = ingest(self.store, event, trusted=True)
+                milestone = next(item for item in result["tasks"][0]["milestones"]
+                                 if item["id"] == result["event_id"])
+                self.assertNotIn("error", result)
+                self.assertEqual(milestone["state"], "CANDIDATE")
+                self.assertIn(outcome, milestone["reason"])
+                self.assertIsNone(milestone["claim_id"])
+        self.assertIsNone(self.store.revision())
+
     def test_required_evidence_missing_reports_failure(self):
         self.event["checks"][0]["pointer"] = "/missing"
         result = ingest(self.store, self.event, trusted=True)
@@ -192,24 +206,129 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(result["tasks"][0]["state"], "FAIL")
         self.assertIsNone(self.store.revision())
 
+    def test_unusable_runner_output_retains_failure_without_raw_content(self):
+        cases = [
+            ('import sys;sys.exit(1)', "INCONCLUSIVE"),
+            ('print("private-fixture-output")', "INCONCLUSIVE"),
+            ('print("x" * 64001)', "INCONCLUSIVE"),
+            ('import sys;print("{}");sys.exit(1)', "FAIL"),
+        ]
+        for index, (command, outcome) in enumerate(cases):
+            with self.subTest(command=command):
+                name = "unusable-" + str(index)
+                register_runner(self.store, "test/android", name, {
+                    "argv": [sys.executable, "-c", command],
+                    "conditions": self.event["conditions"],
+                    "checks": self.event["checks"], "title": "Unusable output",
+                    "anchors": []}, True)
+                result = run_registered(self.store, "test/android", name, "session", name, "one")
+                task = result["tasks"][0]
+                self.assertNotIn("error", result)
+                self.assertEqual(task["state"], outcome)
+                self.assertEqual(task["milestones"][0]["state"], "CANDIDATE")
+                self.assertEqual(task["invocations"][0]["state"], "RECORDED")
+                body = self.store.db.execute("SELECT body FROM milestones WHERE id=?",
+                                             (result["event_id"],)).fetchone()[0]
+                self.assertNotIn("private-fixture-output", body)
+                if outcome == "INCONCLUSIVE":
+                    self.assertIn("Oversized or non-JSON runtime output",
+                                  json.loads(body)["uncertainties"])
+                self.assertIsNone(self.store.revision())
+
+    def test_timed_out_runner_saves_inconclusive_candidate(self):
+        register_runner(self.store, "test/android", "timeout", {
+            "argv": [sys.executable, "-c", 'print("{}")'],
+            "conditions": self.event["conditions"], "checks": self.event["checks"],
+            "title": "Timed out probe", "anchors": []}, True)
+        with patch("local_learning_runtime.learning.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired("fixture", 30)):
+            result = run_registered(self.store, "test/android", "timeout", "session", "timeout", "one")
+        self.assertNotIn("error", result)
+        self.assertEqual(result["tasks"][0]["state"], "INCONCLUSIVE")
+        self.assertEqual(result["tasks"][0]["milestones"][0]["state"], "CANDIDATE")
+        body = self.store.db.execute("SELECT body FROM milestones WHERE id=?",
+                                     (result["event_id"],)).fetchone()[0]
+        self.assertIn("Validator timed out after 30 seconds.", json.loads(body)["uncertainties"])
+        self.assertIsNone(self.store.revision())
+
     def test_hooks_capture_task_boundaries_not_claim_success(self):
+        from local_learning_runtime.context import knowledge_revision
         base = {"sessionId": "hook-session", "cwd": str(self.repo), "timestamp": 1}
         hook(self.store, "copilot", "userPromptSubmitted", dict(base, prompt="First task"))
+        rev_before = knowledge_revision(self.store)
         hook(self.store, "copilot", "postToolUse", dict(base, toolName="bash",
              toolResult={"resultType": "success", "textResultForLlm": "I succeeded; token=private"}))
+        self.assertEqual(knowledge_revision(self.store), rev_before)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM milestones").fetchone()[0], 0)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM tool_traces").fetchone()[0], 1)
         hook(self.store, "copilot", "agentStop", base)
         self.assertIsNone(self.store.revision())
-        body = self.store.db.execute("SELECT body FROM milestones").fetchone()[0]
-        self.assertNotIn("token=private", body)
+        for table in ("tool_traces", "client_receipts"):
+            for row in self.store.db.execute("SELECT * FROM " + table):
+                self.assertNotIn("token=private", json.dumps(dict(row)))
         hook(self.store, "copilot", "userPromptSubmitted", dict(base, timestamp=2, prompt="Second task"))
         self.assertEqual(self.store.db.execute("SELECT count(*) FROM task_runs").fetchone()[0], 2)
+
+    def test_post_tool_use_with_debugger_assignments_creates_redacted_candidate(self):
+        base = {"sessionId": "dbg-session", "cwd": str(self.repo), "timestamp": 1}
+        hook(self.store, "copilot", "userPromptSubmitted", dict(base, prompt="Debug auth flow"))
+        hook(self.store, "copilot", "postToolUse", dict(base, toolName="bash",
+             toolResult={"resultType": "success",
+                         "textResultForLlm": 'main[1] status_code = 200\nmain[1] auth_token = "secret-val"\n'}))
+        row = self.store.db.execute("SELECT state,body FROM milestones").fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["state"], "CANDIDATE")
+        self.assertIn("200", row["body"])
+        self.assertNotIn("secret-val", row["body"])
 
     def test_session_start_context_is_bounded_and_relevant(self):
         ingest(self.store, self.event, trusted=True)
         output = hook(self.store, "copilot", "sessionStart",
                       {"sessionId": "new", "cwd": str(self.repo), "initialPrompt": "profile"})
-        self.assertLess(len(output["additionalContext"].encode()), 8000)
+        encoded = output["additionalContext"].encode()
+        self.assertLessEqual(len(encoded), 1024)
+        parsed = json.loads(output["additionalContext"])
+        self.assertEqual(parsed["schema"], "llr.session_index.v1")
+        self.assertEqual(parsed["layer"], 0)
         self.assertIn("CONDITIONS_UNKNOWN", output["additionalContext"])
+
+    def test_monorepo_alias_relevance_gate_skips_unrelated_prompts(self):
+        from local_learning_runtime.clients import doctor
+        from local_learning_runtime.learning import tokenize, prune_noise
+        ingest(self.store, self.event, trusted=True)
+        register_alias(self.store, "test/android", self.root, False, True)
+        unrelated = "看一下 anthropic the components of agent memory 这个文章"
+        prior_title = "WidgetParser.kt 看一下这个三个文件 为什么不只是新增还有大部分修改的逻辑"
+        self.assertEqual(tokenize(unrelated) & tokenize(prior_title), set())
+        start_out = hook(self.store, "copilot", "sessionStart",
+                         {"sessionId": "unrelated-s1", "cwd": str(self.root), "initialPrompt": unrelated})
+        self.assertEqual(start_out, {})
+        prompt_out = hook(self.store, "copilot", "userPromptSubmitted",
+                          {"sessionId": "unrelated-s1", "cwd": str(self.root), "prompt": unrelated})
+        self.assertEqual(prompt_out, {})
+        self.assertEqual(self.store.db.execute(
+            "SELECT count(*) FROM task_runs WHERE session='unrelated-s1'").fetchone()[0], 0)
+        diag = doctor(self.store)
+        latest = next(r for r in diag["recent_handoffs"] if r["session"] == "unrelated-s1")
+        self.assertFalse(latest["context_injected"])
+        self.assertEqual(latest["gated"], "alias_irrelevant")
+        relevant_out = hook(self.store, "copilot", "sessionStart",
+                            {"sessionId": "relevant-s2", "cwd": str(self.root),
+                             "initialPrompt": "Android profile navigation"})
+        self.assertIn("additionalContext", relevant_out)
+        self.assertLessEqual(len(relevant_out["additionalContext"].encode()), 1024)
+        # Also verify prune_noise migrates legacy empty tool milestones without touching claims.
+        ingest(self.store, {
+            "schema": "llr.milestone.v1", "workspace": "test/android",
+            "session": "legacy-s", "task": "legacy-t", "milestone": "tool-empty1",
+            "title": prior_title, "kind": "hypothesis", "outcome": "INCONCLUSIVE",
+            "conditions": {}, "operations": [{"tool": "bash"}],
+            "observation": {"tool_transport_result": "success",
+                            "runtime_assertions_supplied": False, "debugger_assignments": []},
+            "checks": [], "anchors": [], "uncertainties": ["none"]})
+        pruned = prune_noise(self.store, True, vacuum=True)
+        self.assertEqual(pruned["removed_empty_milestones"], 1)
+        self.assertEqual(pruned["surviving_claims"], 1)
 
     def test_mcp_search_has_actual_receipt(self):
         ingest(self.store, self.event, trusted=True)

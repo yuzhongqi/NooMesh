@@ -202,6 +202,10 @@ class Store:
             CREATE TABLE IF NOT EXISTS validator_invocations (
                 id TEXT PRIMARY KEY, task_run TEXT NOT NULL REFERENCES task_runs(id),
                 state TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS tool_traces (
+                id TEXT PRIMARY KEY, task_run TEXT NOT NULL REFERENCES task_runs(id),
+                tool TEXT NOT NULL, result_type TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS tool_traces_task_run ON tool_traces(task_run);
             CREATE TABLE IF NOT EXISTS solutions (
                 id TEXT NOT NULL, workspace TEXT NOT NULL REFERENCES workspaces(id),
                 version INTEGER NOT NULL, lifecycle TEXT NOT NULL,

@@ -20,9 +20,9 @@ again.
 | Capability | What you get |
 |---|---|
 | **Shared memory across sessions** | CLI, MCP and supported client hooks connect to one on-demand local Host and private data store. |
-| **Automatic capture of verified work** | Preauthorized validators save scoped observations and evidence as part of execution, without an extra "save this" prompt. Ordinary tool output remains unverified. |
+| **Automatic capture of verified work** | Preauthorized validators save scoped observations and evidence as part of execution, without an extra "save this" prompt. Ordinary tool output is isolated in lightweight `tool_traces` rather than polluting candidate memory. |
 | **Reusable solution memos** | Versioned prerequisites (P), bounded procedures (R), and outcome assertions (Q), with explicit parameter and branch coverage. |
-| **Progressive recall** | Load a project outline, follow relevant themes, retrieve task summaries, and expand details only when needed - not the whole memory database. |
+| **Progressive recall & compact session index** | Inject a `<= 1024` byte `llr.session_index.v1` L0 header at `sessionStart` (gated against unrelated prompts in monorepo alias roots), rank L2 by epistemic tier (`solution > claim > BLOCKED > legacy > candidate`), and expand details on demand. |
 | **Local-first execution** | Matching verified contracts execute deterministically. Supported readonly pre-model hooks can return a local result without another model inference. |
 | **Bounded learning missions** | Explicitly approve source-inspection and revalidation queues with checkpoints, deadlines, permissions and budgets. Model work requires a separately verified cost gateway. |
 | **Private, inspectable knowledge** | Generate readable local HTML and matching JSON, inspect provenance, detect conflicts and drift, and delete workspace knowledge. |
@@ -148,6 +148,32 @@ and maintenance reasons from the same data. Export a new snapshot to see changes
 ```sh
 llr export-portal --workspace sample/android --output /private/knowledge-view/new-snapshot
 ```
+
+### Noise isolation, session index and storage hygiene
+
+- **Ordinary `postToolUse` separation:** Hook events without debugger variable
+  assignments are recorded in `tool_traces` (without raw tool output) instead of
+  `milestones`. They never create unverified candidate cards, advance
+  `knowledge_revision`, or trigger derived view rebuilds.
+- **Bounded `context_views` cache:** Derived view snapshots keep only pinned
+  active-session revisions and at most 8 recent unreferenced revisions. To
+  migrate legacy empty tool-transport milestones and compact an existing SQLite
+  store after stopping idle work:
+  ```sh
+  llr prune-noise --approve --vacuum
+  ```
+- **Compact `sessionStart` L0 header & monorepo alias gating:** `sessionStart`
+  emits `llr.session_index.v1` (`layer: 0`, strictly `<= 1024` UTF-8 bytes:
+  counts, custom themes, explicit preferences, and up to 2 single-line top-hit
+  pointers). When `cwd` matches only via a parent `workspace_alias` (such as a
+  monorepo root) and the prompt has no target platform, workspace slug, `.kt`/`.swift`
+  file cue, or workspace technical identifier match, the hook returns `{}` (zero
+  bytes injected, recorded in `llr doctor` as `context_injected: false`,
+  `gated: "alias_irrelevant"`).
+- **Epistemic L2 tiering & conversational stopword filtering:** `context --level 2`
+  orders matches by `usable solution > usable claim > BLOCKED safety warning >
+  legacy > candidate` before lexical score and bounded reuse count, and strips
+  high-frequency English/Chinese conversational filler before bigram matching.
 
 These checks are wired into claim recall/search, progressive context,
 solution route/execute, dependency checks and context refresh. A pinned old view
@@ -278,7 +304,10 @@ llr register-alias --workspace officemobile/android \
 ```
 
 别名只用于发现，不改变源码锚点根目录。多平台父目录需要任务明确平台，否则返回
-`AMBIGUOUS`；未登记目录返回 `UNKNOWN_WORKSPACE`。初次验收建议直接打开登记的根目录。
+`AMBIGUOUS`；未登记目录返回 `UNKNOWN_WORKSPACE`。在父级别名目录（`via_alias: true`，
+例如大型 Monorepo 根目录）中，被动生命周期 hook 会执行**相关性门控**：当输入既未指明目标平台／
+项目标识，也未命中已登记主题或正式知识中的领域技术标识符时，自动静默跳过注入（返回 `{}`，
+不创建无关 `task_run`）。初次验收建议直接打开登记的根目录，或在提问中带明确业务标识。
 
 ### 7. 验证真实接入
 
@@ -290,10 +319,15 @@ llr context --cwd "$PROJECT_ROOT" --query "Android" --session install-check --le
 然后在 VS Code／Codex 中创建全新 chat，提出普通项目问题，再运行 `llr doctor`
 检查 `recent_handoffs`：
 
-- 实际 session 是否留下交接记录；
+- 实际 session 是否留下交接记录（包含 `context_injected` 与门控原因 `gated`）；
 - workspace、客户端和时间是否正确；
 - hook 是否被信任并触发；
 - 有知识时是否引用正确 revision、条件和证据。
+
+> **VS Code 指令缓存提示**：修改或移除 `~/.copilot/instructions/*.instructions.md` 后，
+> `Developer: Reload Window` 仅刷新前端窗口而不重启后台常驻的 `copilot-runtime` 进程；
+> 完全退出并重开一次 VS Code（`Cmd + Q`）才会刷新内存中的全局指令缓存。
+> 更新本地 runtime 代码后，执行 `llr host-stop` 让守护进程按需加载新代码。
 
 **空库不是失败**；没有实际交接凭据则不能声称客户端自动接通。真正的运行验证还需要
 登记对应预授权 validator；setup 不授权登录、消息发送、购买、隐私设置变更或任意命令。
@@ -422,14 +456,17 @@ llr context --cwd /absolute/project --query "android" --session S --level 3 \
 llr context-refresh --session S
 ```
 
-L0 只给目录，L1 给主题关键点与有限成员，L2 给任务候选及完整条件，
-L3 按完整字段展开。默认 6000 UTF-8 bytes，最大 12000；返回遗漏数和 cursor。
+L0 只给目录（`sessionStart` 自动注入精简版 `llr.session_index.v1`，严格 `<= 1024` UTF-8 bytes），
+L1 给主题关键点与有限成员，L2 按认知可信度分档（可用 `solution` > 可用 `claim` > `BLOCKED` 风险提示 >
+`legacy` > `candidate`）返回任务候选及完整条件，
+L3 按完整字段展开。`context` 默认 6000 UTF-8 bytes，最大 12000；返回遗漏数和 cursor。
 单个必要字段超过预算时显式 `ITEM_TOO_LARGE`，不截掉条件保留结论。
 本地执行器读取完整 contract，不凭摘要执行。
 
 主题别名、成员和一跳关系属于私人项目配置，不把业务关键词写入引擎。
-索引和 summaries 来自一个权威存储；snapshot 固定 revision，任务边界 refresh。
-当前使用本地词法匹配，不声称已提供通用语义理解或大型向量索引。
+索引和 summaries 来自一个权威存储（`context_views` 自动限制未引用历史快照数量）；
+snapshot 固定 revision，任务边界 refresh。
+当前使用去除了中英文会话套话与助词伪二元词的本地词法匹配，不声称已提供通用语义理解或大型向量索引。
 
 ### 客户端关系与本地优先
 
@@ -437,7 +474,13 @@ L3 按完整字段展开。默认 6000 UTF-8 bytes，最大 12000；返回遗漏
 `local_experience_context`、`local_experience_route`、`local_experience_execute`。
 普通 task/验证事件继续使用既有 API，不建立平行知识库。
 
-Codex 支持的 UserPromptSubmit hook 自动提供 L2；可选择在 `setup ... --client
+`sessionStart` hook 仅注入 `<= 1024 UTF-8 bytes` 的 `llr.session_index.v1` L0 极简索引头
+（工作区统计、注册主题、显式偏好与最多 2 条单行标题指针）；在父级别名目录（如 Monorepo 根）
+且首轮输入无目标平台或领域词命中时自动静默跳过注入。无调试器赋值的普通 `postToolUse`
+仅记入轻量 `tool_traces`，不进入 `candidate` 记忆池；历史空壳回执可通过
+`llr prune-noise --approve --vacuum` 清理回收。
+
+Codex 支持的 UserPromptSubmit hook 在相关性门控通过后自动提供有界 L2；可选择在 `setup ... --client
 codex-hooks --local-first-readonly --approve` 后，让**精确匹配、已验证、纯文件只读**
 流程直接完成并 block 后续模型请求，结果通过 hook 消息展示。
 
@@ -1094,6 +1137,10 @@ each with several checkpoints. Schema:
 - External structured events, code inference, user evidence, screenshots alone
   and hypotheses: durable candidates, not automatically verified facts.
 - FAIL, PARTIAL, INCONCLUSIVE or a missing predicate: no success promotion.
+- Nonpassing runtime outcomes remain durable candidates even when predicate
+  values are absent. Timeout and unusable-output diagnostics are retained without
+  raw stdout/stderr; these outcomes are not publication/storage failures.
+  A producer reporting PASS must still supply every required predicate.
 - Sensitive predicate values changed by redaction: publication refused.
 - Explicit contradictions/supersessions: candidate pending human reconciliation;
   related old knowledge is blocked from automatic search reuse.

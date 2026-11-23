@@ -19,6 +19,40 @@ from .privacy import sanitize
 
 MAX_EVENT_BYTES = 128_000
 RELATIONS = {"supports", "contradicts", "supersedes", "depends_on"}
+EN_STOPWORDS = {
+    "a", "i", "an", "and", "are", "as", "at", "be", "by", "can", "for", "from",
+    "how", "in", "is", "it", "of", "on", "or", "that", "the", "this", "to",
+    "what", "why", "with", "android", "ios", "officemobile",
+}
+ZH_STOP_PHRASES = (
+    "看一下", "帮我看", "看下", "请问", "为什么", "是什么", "有什么", "怎么", "如何",
+    "能不能", "可以", "是否", "请先", "不要", "之前", "继续", "现在", "当前", "已有",
+    "本地", "只读", "任务", "验证", "我们", "你们", "他们", "这个", "那个", "这些",
+    "那些", "一个", "一些", "一下",
+)
+ZH_PARTICLES = re.compile(r"[的了吗呢吧啊呀嘛着把被给在是有和与或但却又也都就才还很太更最个]")
+
+
+def is_empty_tool_milestone(event: Dict[str, Any]) -> bool:
+    obs = event.get("observation")
+    if not isinstance(obs, dict):
+        return False
+    return (obs.get("runtime_assertions_supplied") is False
+            and not obs.get("debugger_assignments")
+            and not event.get("checks"))
+
+
+def record_tool_trace(store: Store, workspace: str, task_run: str,
+                      tool_name: str, result_type: str, timestamp: Any) -> str:
+    load_policy(store, workspace)
+    key = privacy_key(store)
+    safe_tool = sanitize(str(tool_name)[:200], key)[0]
+    safe_result = sanitize(str(result_type)[:100], key)[0]
+    trace_id = digest(canonical([task_run, timestamp, safe_tool, safe_result]).encode())
+    with store.transaction():
+        store.db.execute("INSERT OR IGNORE INTO tool_traces VALUES (?,?,?,?,?)",
+                         (trace_id, task_run, safe_tool, safe_result, now()))
+    return trace_id
 
 
 def privacy_key(store: Store) -> bytes:
@@ -175,7 +209,8 @@ def ingest(store: Store, event: Dict[str, Any], trusted: bool = False,
     state = "CANDIDATE"
     reason = "No trusted runtime predicate producer; retained as scoped unverified knowledge."
     try:
-        if trusted and event["kind"] == "runtime_observation" and event["checks"]:
+        if (trusted and event["kind"] == "runtime_observation"
+                and event["outcome"] == "PASS" and event["checks"]):
             raw_observation = event["observation"]
             evidence = store.observe(event_id, event["workspace"], safe["conditions"],
                                      canonical(safe["observation"]).encode(), "application/json")
@@ -271,6 +306,9 @@ def status(store: Store, run_id: Optional[str] = None) -> Dict[str, Any]:
             "SELECT id,state,reason,claim_id,revision,updated_at FROM milestones "
             "WHERE task_run=? ORDER BY updated_at", (row["id"],))]
         tasks.append(dict(row, milestones=milestones,
+                          tool_trace_count=store.db.execute(
+                              "SELECT count(*) FROM tool_traces WHERE task_run=?",
+                              (row["id"],)).fetchone()[0],
                           invocations=[dict(item) for item in store.db.execute(
                               "SELECT id,state,updated_at FROM validator_invocations WHERE task_run=?",
                               (row["id"],))],
@@ -299,6 +337,8 @@ def graph(store: Store, workspace: str) -> Dict[str, Any]:
         nodes.append({"id": task["id"], "kind": "task", "title": task["title"], "state": task["state"]})
         for row in store.db.execute("SELECT * FROM milestones WHERE task_run=?", (task["id"],)):
             body = json.loads(row["body"])
+            if row["state"] != "PUBLISHED" and is_empty_tool_milestone(body):
+                continue
             nodes.append({"id": row["id"], "kind": body["kind"], "state": row["state"],
                           "outcome": body["outcome"], "observation": body["observation"],
                           "conditions": body["conditions"], "claim_id": row["claim_id"]})
@@ -328,11 +368,14 @@ def graph(store: Store, workspace: str) -> Dict[str, Any]:
 
 def tokenize(text: str) -> set:
     lower = text.lower()
-    words = set(re.findall(r"[a-z0-9_]+", lower))
-    for part in re.findall(r"[\u4e00-\u9fff]+", lower):
-        words.update(part[i:i + 2] for i in range(max(1, len(part) - 1)))
-    return words - {"android", "ios", "officemobile", "只读", "任务", "当前", "验证",
-                    "本地", "已有", "是否", "请先", "不要"}
+    words = {word for word in re.findall(r"[a-z0-9_]+", lower) if word not in EN_STOPWORDS}
+    cleaned = lower
+    for phrase in ZH_STOP_PHRASES:
+        cleaned = cleaned.replace(phrase, " ")
+    cleaned = ZH_PARTICLES.sub(" ", cleaned)
+    for part in re.findall(r"[\u4e00-\u9fff]{2,}", cleaned):
+        words.update(part[i:i + 2] for i in range(len(part) - 1))
+    return words - set(ZH_STOP_PHRASES)
 
 
 def search(store: Store, cwd: Path, query: str, session: str,
@@ -381,6 +424,8 @@ def search(store: Store, cwd: Path, query: str, session: str,
     for row in store.db.execute("SELECT m.* FROM milestones m JOIN task_runs t ON t.id=m.task_run "
                                "WHERE t.workspace=? AND m.state!='PUBLISHED'", (workspace,)):
         body = json.loads(row["body"])
+        if is_empty_tool_milestone(body):
+            continue
         score = len(terms & tokenize(body["title"] + " " + canonical(body["observation"])))
         if score:
             candidates.append((score, {"id": row["id"], "kind": body["kind"], "title": body["title"],
@@ -500,12 +545,14 @@ def run_registered(store: Store, workspace: str, runner: str, session: str, task
                 "without reviewing task-status.")
         store.db.execute("INSERT INTO validator_invocations VALUES (?,?,?,?)",
                          (event_id, run_id, "RUNNING", now()))
+    uncertainties = ["Only the registered predicates and recorded runtime conditions."]
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
         try:
             completed = subprocess.run(spec["argv"], cwd=store.workspace(workspace)["root"],
                                        stdout=stdout, stderr=stderr, timeout=30)
         except subprocess.TimeoutExpired:
             code, outcome = -1, "INCONCLUSIVE"
+            uncertainties.append("Validator timed out after 30 seconds.")
         else:
             code, outcome = completed.returncode, "PASS" if completed.returncode == 0 else "FAIL"
         stdout.seek(0)
@@ -516,6 +563,7 @@ def run_registered(store: Store, workspace: str, runner: str, session: str, task
         except (RuntimeErrorBase, ValueError, UnicodeDecodeError):
             # Arbitrary stdout can contain unrelated user data; retain failure metadata only.
             observation = {"output_discarded": True, "reason": "Oversized or non-JSON runtime output"}
+            uncertainties.append(observation["reason"])
             outcome = "INCONCLUSIVE"
     observed_conditions = spec["conditions"]
     if outcome == "PASS" and spec.get("conditions_pointer"):
@@ -530,7 +578,7 @@ def run_registered(store: Store, workspace: str, runner: str, session: str, task
              "kind": "runtime_observation", "outcome": outcome, "conditions": observed_conditions,
              "operations": [{"runner": runner, "exit_code": code, "actions": actions}],
              "observation": observation, "checks": spec["checks"], "anchors": spec["anchors"],
-             "uncertainties": ["Only the registered predicates and recorded runtime conditions."],
+             "uncertainties": uncertainties,
              "source": {"runner": runner, "pinned": spec["pinned"],
                         "authorization_sha256": digest(canonical(spec).encode()), "recorded_at": now()}}
     if "problem" in spec:
@@ -619,6 +667,8 @@ def forget_workspace(store: Store, workspace: str, approve: bool) -> Dict[str, A
                          "(SELECT id FROM task_runs WHERE workspace=?)", (workspace,))
         store.db.execute("DELETE FROM validator_invocations WHERE task_run IN "
                          "(SELECT id FROM task_runs WHERE workspace=?)", (workspace,))
+        store.db.execute("DELETE FROM tool_traces WHERE task_run IN "
+                         "(SELECT id FROM task_runs WHERE workspace=?)", (workspace,))
         store.db.execute("DELETE FROM task_runs WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM solution_cases WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM solution_runs WHERE workspace=?", (workspace,))
@@ -664,3 +714,61 @@ def forget_workspace(store: Store, workspace: str, approve: bool) -> Dict[str, A
     return {"status": "FORGOTTEN", "workspace": workspace, "revision": revision,
             "notice": "External imports, exported HTML/JSON and OS backups remain owner-managed. "
                       "Historical revisions containing this workspace are revoked."}
+
+
+def prune_noise(store: Store, approve: bool, vacuum: bool = False) -> Dict[str, Any]:
+    require(approve, "Explicit approval required to prune empty tool-transport milestones")
+    require(store.db.execute("SELECT 1 FROM missions WHERE state='RUNNING' LIMIT 1").fetchone() is None,
+            "Pause active learning missions before pruning")
+    require(store.db.execute("SELECT 1 FROM solution_runs WHERE state='RUNNING' LIMIT 1").fetchone() is None,
+            "Review active solution runs before pruning")
+    db_file = store.home / "runtime.sqlite"
+    bytes_before = db_file.stat().st_size if db_file.exists() else 0
+    protected = {row[0] for row in store.db.execute("SELECT id FROM milestone_attestations")}
+    for source, target in store.db.execute("SELECT source,target FROM knowledge_relations"):
+        protected.add(source)
+        protected.add(target)
+    removable = []
+    traces = []
+    for row in store.db.execute("SELECT id,task_run,body,updated_at FROM milestones WHERE state!='PUBLISHED'"):
+        if row["id"] in protected:
+            continue
+        body = json.loads(row["body"])
+        if is_empty_tool_milestone(body):
+            ops = body.get("operations") or [{}]
+            tool = str(ops[0].get("tool", "unknown"))[:200] if isinstance(ops[0], dict) else "unknown"
+            result_type = str(body.get("observation", {}).get("tool_transport_result", "unknown"))[:100]
+            removable.append(row["id"])
+            traces.append((row["id"], row["task_run"], tool, result_type, row["updated_at"]))
+    for offset in range(0, len(removable), 500):
+        batch_ids = removable[offset:offset + 500]
+        batch_traces = traces[offset:offset + 500]
+        placeholders = ",".join("?" for _ in batch_ids)
+        with store.transaction():
+            store.db.executemany("INSERT OR IGNORE INTO tool_traces VALUES (?,?,?,?,?)", batch_traces)
+            store.db.execute("DELETE FROM milestones WHERE id IN (" + placeholders + ")", batch_ids)
+    with store.transaction():
+        views_before = store.db.execute("SELECT count(*) FROM context_views").fetchone()[0]
+        # Clear derived views holding pruned noise; refresh_context handles missing old revisions cleanly.
+        store.db.execute("DELETE FROM context_reads WHERE session NOT IN "
+                         "(SELECT DISTINCT session FROM task_runs WHERE state='in_progress')")
+        store.db.execute("DELETE FROM context_views")
+        views_removed = views_before
+    from .context import build_view
+    clean_view = build_view(store)
+    if vacuum:
+        store.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        store.db.execute("VACUUM")
+    bytes_after = db_file.stat().st_size if db_file.exists() else 0
+    return {
+        "status": "PRUNED",
+        "removed_empty_milestones": len(removable),
+        "migrated_tool_traces": len(traces),
+        "removed_context_views": views_removed,
+        "current_context_revision": clean_view["revision"],
+        "published_revision": store.revision(),
+        "surviving_claims": store.db.execute("SELECT count(*) FROM claims").fetchone()[0],
+        "surviving_milestones": store.db.execute("SELECT count(*) FROM milestones").fetchone()[0],
+        "sqlite_bytes_before": bytes_before,
+        "sqlite_bytes_after": bytes_after,
+    }

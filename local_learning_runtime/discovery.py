@@ -42,9 +42,9 @@ def discover(store: Store, cwd: Path, session: str, platform: Optional[str] = No
     cwd = cwd.expanduser().resolve()
     require(cwd.is_dir(), "Current working directory must exist")
     matches = []
-    roots = [dict(row, requires_platform=0) for row in store.db.execute(
+    roots = [dict(row, requires_platform=0, is_alias=0) for row in store.db.execute(
         "SELECT * FROM workspaces ORDER BY id")]
-    roots.extend(dict(row) for row in store.db.execute(
+    roots.extend(dict(row, is_alias=1) for row in store.db.execute(
         "SELECT w.id,a.root,w.platform,a.requires_platform FROM workspace_aliases a "
         "JOIN workspaces w ON w.id=a.workspace"))
     for row in roots:
@@ -59,7 +59,12 @@ def discover(store: Store, cwd: Path, session: str, platform: Optional[str] = No
     if matches:
         specificity = max(len(Path(item["root"]).parts) for item in matches)
         matches = [item for item in matches if len(Path(item["root"]).parts) == specificity]
-        matches = list({(item["id"], item["root"]): item for item in matches}.values())
+        deduped = {}
+        for item in matches:
+            key = (item["id"], item["root"])
+            if key not in deduped or item["is_alias"] < deduped[key]["is_alias"]:
+                deduped[key] = item
+        matches = list(deduped.values())
     status = "DISCOVERED" if len(matches) == 1 else "AMBIGUOUS" if matches else "UNKNOWN_WORKSPACE"
     if any(item["requires_platform"] for item in matches) and platform is None:
         status = "AMBIGUOUS"
@@ -86,6 +91,7 @@ def discover(store: Store, cwd: Path, session: str, platform: Optional[str] = No
             result.update({
                 "workspace": workspace, "registered_root": selected["root"],
                 "platform": selected["platform"],
+                "via_alias": bool(selected["is_alias"]),
                 "knowledge_counts": {"published": len(claims), "legacy": len(legacy)},
                 "task_types": sorted({item["spec"]["task_type"] for item in claims}),
                 "claim_ids": sorted(item["spec"]["id"] for item in claims)[:16],

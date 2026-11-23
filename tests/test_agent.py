@@ -393,6 +393,30 @@ class AgentTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeErrorBase, "delimiter"):
             compile_pattern("check {a}{b}", definitions)
 
+    def test_l2_ranking_prioritizes_verified_kinds_over_candidates(self):
+        from local_learning_runtime.learning import ingest
+        self.publish()
+        ingest(self.store, {
+            "schema": "llr.milestone.v1", "workspace": "sample/android",
+            "session": "s1", "task": "t1", "milestone": "m-claim",
+            "title": "Verify approved file identity runtime check",
+            "kind": "runtime_observation", "outcome": "PASS",
+            "conditions": {"artifact_sha256": "a" * 64},
+            "operations": [{"action": "probe"}], "observation": {"ok": True},
+            "anchors": [], "checks": [{"pointer": "/ok", "expected": True}],
+            "uncertainties": ["scoped"]}, trusted=True)
+        ingest(self.store, {
+            "schema": "llr.milestone.v1", "workspace": "sample/android",
+            "session": "s2", "task": "t2", "milestone": "m-cand",
+            "title": "Verify the approved file identity check file identity extra words",
+            "kind": "user_evidence", "outcome": "INCONCLUSIVE",
+            "conditions": {"historical": True},
+            "operations": [{"action": "note"}], "observation": {"note": "file identity"},
+            "anchors": [], "checks": [], "uncertainties": ["unverified"]})
+        l2 = packet(self.store, self.repo, "Verify approved file identity", "reader", 2)
+        kinds = [item["kind"] for item in l2["items"]]
+        self.assertEqual(kinds[:3], ["solution", "claim", "candidate"])
+
 
 if __name__ == "__main__":
     unittest.main()

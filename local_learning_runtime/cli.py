@@ -16,7 +16,7 @@ from .knowledge import catalog, export_portal, import_graph
 from .acceptance import android_acceptance
 from .discovery import discover, register_alias
 from .learning import (authorize, ingest, status, graph, search, register_runner, run_registered,
-                       import_debugger_log, forget_workspace)
+                       import_debugger_log, forget_workspace, prune_noise)
 from .learning import retry_milestone
 from .clients import (hook, install_copilot, install_codex, install_codex_hooks,
                       codex_notify, setup_client, doctor)
@@ -146,6 +146,9 @@ def parser() -> argparse.ArgumentParser:
     forgotten = commands.add_parser("forget-workspace")
     forgotten.add_argument("--workspace", required=True)
     forgotten.add_argument("--approve", action="store_true")
+    pruned = commands.add_parser("prune-noise")
+    pruned.add_argument("--approve", action="store_true")
+    pruned.add_argument("--vacuum", action="store_true")
     policy = commands.add_parser("authorize-local")
     policy.add_argument("--workspace", action="append", required=True)
     policy.add_argument("--approve", action="store_true")
@@ -317,6 +320,8 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
                                    args.title, args.approve)
     if args.command == "forget-workspace":
         return forget_workspace(store, args.workspace, args.approve)
+    if args.command == "prune-noise":
+        return prune_noise(store, args.approve, args.vacuum)
     if args.command == "authorize-local":
         return authorize(store, args.workspace, args.approve)
     if args.command == "ingest":

@@ -96,12 +96,14 @@ def catalog(store: Store, workspace: str) -> Dict[str, Any]:
             solution["memory"] = assess(store, workspace, "solution", solution["id"])
         learning_missions = [dict(row, body=json.loads(row["body"])) for row in store.db.execute(
             "SELECT * FROM missions WHERE workspace=?", (workspace,))]
-        from .learning import status, graph
+        from .learning import status, graph, is_empty_tool_milestone
         tasks = [item for item in status(store)["tasks"] if item["workspace"] == workspace]
         projection = graph(store, workspace)
         for row in store.db.execute("SELECT m.* FROM milestones m JOIN task_runs t ON t.id=m.task_run "
                                    "WHERE t.workspace=? AND m.state!='PUBLISHED'", (workspace,)):
             event = json.loads(row["body"])
+            if is_empty_tool_milestone(event):
+                continue
             candidates.append({"candidate_id": row["id"], "spec": {
                 "id": row["id"], "task_type": event["title"],
                 "statement": canonical(event["observation"]), "conditions": event["conditions"]},

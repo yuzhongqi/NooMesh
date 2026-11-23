@@ -2,13 +2,32 @@
 
 import json
 import os
+import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .core import Store, RuntimeErrorBase, canonical, digest, identifier, now, object_fields, require
 from .discovery import discover, infer_platform
-from .learning import tokenize
+from .learning import is_empty_tool_milestone, tokenize
 from .lifecycle import assess, reference as memory_reference, record as record_usage
+
+PLATFORM_ANCHORS = {
+    "android": re.compile(r"\b(android|apk|adb|gradle|gradlew|kotlin|compose|logcat|espresso|jetpack)\b|安卓", re.I),
+    "ios": re.compile(r"\b(ios|xcode|swift|xcodeproj|xcworkspace|uitest|cocoapods)\b|苹果", re.I),
+}
+DERIVED_THEME_IDS = {"claim", "solution", "legacy", "candidate"}
+
+
+def kind_tier(card: Dict[str, Any]) -> int:
+    kind = card["kind"]
+    blocked = card.get("reuse") == "BLOCKED"
+    if kind == "solution":
+        return 2 if blocked else 0
+    if kind == "claim":
+        return 2 if blocked else 1
+    if kind == "legacy":
+        return 3
+    return 4
 
 
 def define_theme(store: Store, workspace: str, spec: Dict[str, Any], approve: bool) -> Dict[str, Any]:
@@ -35,8 +54,11 @@ def knowledge_revision(store: Store) -> str:
     themes = [list(row) for row in store.db.execute("SELECT * FROM themes ORDER BY workspace,id")]
     legacy = [list(row) for row in store.db.execute(
         "SELECT id,workspace,source_sha256 FROM legacy_intake ORDER BY id")]
-    milestones = [list(row) for row in store.db.execute(
-        "SELECT id,state,input_sha FROM milestones ORDER BY id")]
+    milestones = []
+    for row in store.db.execute("SELECT id,state,input_sha,body FROM milestones ORDER BY id"):
+        if row["state"] != "PUBLISHED" and is_empty_tool_milestone(json.loads(row["body"])):
+            continue
+        milestones.append([row["id"], row["state"], row["input_sha"]])
     preferences = [list(row) for row in store.db.execute("SELECT * FROM preferences ORDER BY id")]
     cases = [list(row) for row in store.db.execute(
         "SELECT workspace,solution,version,parameters_sha FROM solution_cases "
@@ -86,6 +108,8 @@ def build_view(store: Store) -> Dict[str, Any]:
         for row in store.db.execute("SELECT m.*,t.workspace FROM milestones m JOIN task_runs t "
                                    "ON t.id=m.task_run WHERE m.state!='PUBLISHED'"):
             event = json.loads(row["body"])
+            if is_empty_tool_milestone(event):
+                continue
             node_id = "milestone:" + row["id"]
             preview = canonical(event["observation"])
             nodes[node_id] = {"id": node_id, "workspace": row["workspace"], "kind": "candidate",
@@ -111,6 +135,11 @@ def build_view(store: Store) -> Dict[str, Any]:
                                 for row in store.db.execute("SELECT * FROM preferences")]}
         store.db.execute("INSERT INTO context_views VALUES (?,?,?)",
                          (revision, canonical(body), now()))
+        store.db.execute(
+            "DELETE FROM context_views WHERE revision!=? "
+            "AND revision NOT IN (SELECT DISTINCT revision FROM context_reads) "
+            "AND revision NOT IN (SELECT revision FROM context_views ORDER BY created_at DESC LIMIT 8)",
+            (revision,))
     return body
 
 
@@ -212,7 +241,7 @@ def packet(store: Store, cwd: Path, query: str, session: str, level: int = 2,
                                   node_detail["version"])["counts"]["verified_success"]
             else:
                 successes = 0
-            return -item[0], -min(3, successes), item[1]
+            return kind_tier(item[2]), -item[0], -min(3, successes), item[1]
         ranked.sort(key=priority)
         candidates = [item[2] for item in ranked]
     else:
@@ -264,6 +293,141 @@ def packet(store: Store, cwd: Path, query: str, session: str, level: int = 2,
                              "context:" + digest(canonical([view["revision"], level, item["id"],
                                                            item.get("detail", {}).get("section")]).encode()))
     require(len(canonical(result).encode()) <= budget, "Context envelope exceeds declared budget")
+    return result
+
+
+def is_workspace_relevant(store: Store, workspace: str, platform: str, prompt: str) -> bool:
+    if not isinstance(prompt, str) or not prompt.strip():
+        return False
+    inferred = infer_platform(prompt)
+    if inferred is not None:
+        return inferred == platform
+    anchor = PLATFORM_ANCHORS.get(platform)
+    if anchor and anchor.search(prompt):
+        return True
+    if platform == "android" and re.search(r"\b\w+\.kt\b", prompt, re.I):
+        return True
+    if platform == "ios" and re.search(r"\b\w+\.swift\b", prompt, re.I):
+        return True
+    slugs = {part.lower() for part in re.split(r"[^A-Za-z0-9]+", workspace)
+             if len(part) >= 3 and part.lower() not in ("android", "ios", "generic", "src")}
+    words = {word.lower() for word in re.findall(r"[A-Za-z0-9_]+", prompt)}
+    if slugs & words:
+        return True
+    # On parent/monorepo aliases without an explicit platform or workspace name, require a
+    # specific ASCII technical identifier (>=4 chars, non-generic) from registered themes or
+    # published claims/solutions rather than generic Chinese bigrams like "客户端" or "上下文".
+    generic_ascii = {"test", "check", "file", "data", "code", "json", "http", "https",
+                     "true", "false", "null", "none", "session", "context", "memory",
+                     "agent", "model", "tool", "task", "user", "init", "main", "list"}
+    specific_words = {w for w in words if len(w) >= 4 and not w.isdigit() and w not in generic_ascii
+                      and not w.startswith("llr")}
+    if not specific_words:
+        return False
+    view = build_view(store)
+    known_identifiers = set()
+    for theme in view["themes"].values():
+        if theme["workspace"] == workspace and theme["id"] not in DERIVED_THEME_IDS:
+            known_identifiers.update(
+                w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}",
+                                              theme["title"] + " " + " ".join(theme["aliases"])))
+    for item in view["nodes"].values():
+        if item["workspace"] == workspace and item["kind"] in ("solution", "claim"):
+            known_identifiers.update(
+                w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", item["title"]))
+    return bool(specific_words & known_identifiers)
+
+
+def session_index(store: Store, cwd: Path, query: str, session: str,
+                  budget: int = 1024) -> Dict[str, Any]:
+    identifier(session, "Session")
+    require(type(budget) is int and 512 <= budget <= 2048, "Session index budget must be 512-2048 bytes")
+    found = discover(store, cwd, session, infer_platform(query) if query.strip() else None)
+    if found["status"] != "DISCOVERED":
+        return found
+    workspace = found["workspace"]
+    view = build_view(store)
+    workspace_nodes = {key: value for key, value in view["nodes"].items()
+                       if value["workspace"] == workspace}
+    custom_themes = [
+        {"id": theme["id"], "title": theme["title"][:60],
+         "count": sum(item in workspace_nodes for item in theme["members"])}
+        for theme in view["themes"].values()
+        if theme["workspace"] == workspace and theme["id"] not in DERIVED_THEME_IDS
+    ]
+    prefs = [
+        {"id": item["id"], "summary": item["body"]["text"][:60]}
+        for item in view["preferences"]
+        if item["workspace"] in (None, workspace) and item["state"] != "candidate"
+    ]
+    top_hits: List[Dict[str, Any]] = []
+    if query.strip():
+        terms = tokenize(query[:2000])
+        if terms:
+            matched: List[Tuple[Tuple[Any, ...], Dict[str, Any], Dict[str, Any]]] = []
+            for node_id, item in workspace_nodes.items():
+                score = len(terms & tokenize(item["title"] + " " + item["summary"]))
+                if not score:
+                    continue
+                reuse = ("CONDITIONS_UNKNOWN" if item["kind"] == "claim"
+                         else "PRECONDITIONS_REQUIRED" if item["kind"] == "solution"
+                         else item["status"])
+                if item["kind"] == "claim":
+                    try:
+                        store.current_valid(item["detail"], store.snapshot(),
+                                            item["detail"]["spec"]["conditions"])
+                    except (RuntimeErrorBase, OSError, ValueError):
+                        reuse = "BLOCKED"
+                if item["kind"] in ("claim", "solution"):
+                    detail = item["detail"]
+                    health = assess(store, workspace, item["kind"], detail["spec"]["id"])
+                    if (detail["version"] != memory_reference(
+                            store, workspace, item["kind"], detail["spec"]["id"])["version"]
+                            or health["status"] not in ("FRESH", "CONDITIONS_UNKNOWN")):
+                        reuse = "BLOCKED"
+                probe = {"id": node_id, "kind": item["kind"],
+                         "title": item["title"][:72], "reuse": reuse}
+                matched.append(((kind_tier(probe), -score, node_id), probe, item))
+            matched.sort(key=lambda entry: entry[0])
+            top_hits = [entry[1] for entry in matched[:2]]
+    counts = {
+        "solutions": sum(1 for item in workspace_nodes.values() if item["kind"] == "solution"),
+        "claims": sum(1 for item in workspace_nodes.values() if item["kind"] == "claim"),
+        "themes": len(custom_themes),
+        "legacy": sum(1 for item in workspace_nodes.values() if item["kind"] == "legacy"),
+    }
+    result: Dict[str, Any] = {
+        "schema": "llr.session_index.v1",
+        "layer": 0,
+        "workspace": workspace,
+        "revision": view["revision"],
+        "counts": counts,
+        "themes": custom_themes[:3],
+        "preferences": prefs[:2],
+        "top_hits": top_hits,
+        "next": "L0 index only. Call local_learning_search or local_experience_context(level=1/2) if relevant.",
+    }
+    while len(canonical(result).encode()) > budget and result["preferences"]:
+        result["preferences"].pop()
+    while len(canonical(result).encode()) > budget and len(result["themes"]) > 1:
+        result["themes"].pop()
+    while len(canonical(result).encode()) > budget and len(result["top_hits"]) > 1:
+        result["top_hits"].pop()
+    if len(canonical(result).encode()) > budget:
+        result["themes"] = []
+    if len(canonical(result).encode()) > budget and result["top_hits"]:
+        result["top_hits"][0]["title"] = result["top_hits"][0]["title"][:24]
+    require(len(canonical(result).encode()) <= budget, "Session index exceeds declared byte budget")
+    with store.transaction():
+        for hit in result["top_hits"]:
+            store.db.execute("INSERT OR IGNORE INTO context_reads VALUES (?,?,?,?)",
+                             (session, workspace, view["revision"], hit["id"]))
+            source_node = workspace_nodes.get(hit["id"])
+            if source_node and source_node["kind"] in ("claim", "solution"):
+                detail = source_node["detail"]
+                record_usage(store, workspace, source_node["kind"], detail["spec"]["id"],
+                             detail["version"], "retrieved", session,
+                             "session_index:" + digest(canonical([view["revision"], hit["id"]]).encode()))
     return result
 
 

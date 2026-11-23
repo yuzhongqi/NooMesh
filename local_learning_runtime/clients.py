@@ -10,10 +10,32 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .core import Store, canonical, digest, now, require
-from .discovery import discover
-from .learning import begin_task, ingest, load_policy, privacy_key, search, status
+from .discovery import discover, infer_platform
+from .learning import (begin_task, ingest, load_policy, privacy_key, record_tool_trace,
+                       search, status)
 from .privacy import sanitize
-from .context import packet
+from .context import is_workspace_relevant, packet, session_index
+
+
+def _record_receipt(store: Store, client: str, session: str, event: str,
+                    workspace: Optional[str], payload: Dict[str, Any],
+                    context_injected: bool, gated: Optional[str] = None) -> Dict[str, Any]:
+    safe_receipt: Dict[str, Any] = {
+        "state_home": str(store.home), "workspace": workspace,
+        "revision": store.revision(), "event": event,
+        "host_pid": os.getpid(), "adapter_api": "0.4",
+        "context_injected": context_injected,
+        "task_state": [item["state"] for item in status(store)["tasks"]
+                       if item["session"] == session],
+    }
+    if gated is not None:
+        safe_receipt["gated"] = gated
+    with store.transaction():
+        receipt_id = digest(canonical([client, session, event, payload.get("timestamp"),
+                                       payload.get("turn-id"), safe_receipt]).encode())
+        store.db.execute("INSERT OR IGNORE INTO client_receipts VALUES (?,?,?,?,?,?,?)",
+                         (receipt_id, client, session, event, workspace, canonical(safe_receipt), now()))
+    return safe_receipt
 
 
 def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -23,23 +45,24 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
     require(isinstance(session, str) and isinstance(cwd, str),
             "Client did not supply stable session ID/cwd; event not recorded")
     prompt = payload.get("prompt") or payload.get("initialPrompt") or payload.get("initial_prompt")
+    prompt_text = prompt[:2000] if isinstance(prompt, str) else ""
     context = None
-    if isinstance(prompt, str) and prompt.strip() and event in ("sessionStart", "userPromptSubmitted"):
-        context = packet(store, Path(cwd), prompt[:2000], session, level=2)
-        selected_workspace = context.get("workspace") or ""
-        platform = "android" if selected_workspace.endswith("/android") else None
-        if selected_workspace.endswith("/ios"):
-            platform = "ios"
-        found = discover(store, Path(cwd), session, platform)
-    else:
-        found = discover(store, Path(cwd), session)
-        if found["status"] != "DISCOVERED":
-            # Turn-ending hooks use the authenticated session's last discovery, not a guessed platform.
-            previous = store.db.execute("SELECT workspace FROM task_runs WHERE session=? "
-                                        "ORDER BY updated_at DESC LIMIT 1", (session,)).fetchone()
-            if previous and previous[0]:
-                found = discover(store, Path(cwd), session, store.workspace(previous[0])["platform"])
+    inferred = infer_platform(prompt_text) if (
+        prompt_text.strip() and event in ("sessionStart", "userPromptSubmitted")) else None
+    found = discover(store, Path(cwd), session, inferred)
+    if found["status"] != "DISCOVERED" and event not in ("sessionStart", "userPromptSubmitted"):
+        # Turn-ending hooks use the authenticated session's last discovery, not a guessed platform.
+        previous = store.db.execute("SELECT workspace FROM task_runs WHERE session=? "
+                                    "ORDER BY updated_at DESC LIMIT 1", (session,)).fetchone()
+        if previous and previous[0]:
+            found = discover(store, Path(cwd), session, store.workspace(previous[0])["platform"])
     if found["status"] != "DISCOVERED":
+        if found["status"] == "AMBIGUOUS" and event in ("sessionStart", "userPromptSubmitted"):
+            candidates = found.get("candidates", [])
+            if not any(is_workspace_relevant(store, item["workspace"], item["platform"], prompt_text)
+                       for item in candidates):
+                _record_receipt(store, client, session, event, None, payload, False, "alias_irrelevant")
+                return {}
         if client == "codex-hooks" and event in ("sessionStart", "userPromptSubmitted"):
             return {"hookSpecificOutput": {
                 "hookEventName": "SessionStart" if event == "sessionStart" else "UserPromptSubmit",
@@ -47,12 +70,12 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
         return {"additionalContext": canonical(found)} if event == "sessionStart" else {}
     workspace = found["workspace"]
     load_policy(store, workspace)
+    if (event in ("sessionStart", "userPromptSubmitted") and found.get("via_alias")
+            and not is_workspace_relevant(store, workspace, found["platform"], prompt_text)):
+        _record_receipt(store, client, session, event, workspace, payload, False, "alias_irrelevant")
+        return {}
     if event == "sessionStart":
-        if context is None:
-            context = {"workspace": workspace, "revision": found["revision"],
-                       "task_types": found["task_types"], "claim_ids": found["claim_ids"],
-                       "notice": "Use local_learning_search MCP for the actual task; runtime is the "
-                                 "published observation authority, Userbot is legacy background."}
+        context = session_index(store, Path(cwd), prompt_text, session, budget=1024)
     if event == "userPromptSubmitted" and isinstance(prompt, str):
         title, _ = sanitize(prompt[:2000], privacy_key(store))
         task = "turn-" + digest(canonical([session, payload.get("turn_id"),
@@ -79,7 +102,9 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
                             (str, int, bool) else canonical(value)) for key, value in result["result"].items())
                         return {"decision": "block", "reason": "Solved locally · 已在本地完成\n" + readable,
                                 "systemMessage": "Local solution completed; no model request required."}
-        if client != "codex-hooks":
+        if client == "codex-hooks":
+            context = packet(store, Path(cwd), prompt_text, session, level=2, budget=2000)
+        else:
             context = None
     if event == "postToolUse":
         # Persist only a minimal diagnostic; raw tool responses and user content are not logged.
@@ -104,37 +129,31 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
                         assignments.append({"line": number, "expression": expression, "value": value})
                         if len(assignments) == 16:
                             break
-            event_body = {"schema": "llr.milestone.v1", "workspace": workspace, "session": session,
-                          "task": task_row["task"],
-                          "milestone": "tool-" + digest(canonical(
-                              [payload.get("timestamp"), payload.get("toolName"),
-                               payload.get("tool_name"), result_type]).encode())[:24],
-                          "title": task_row["title"],
-                          "kind": "runtime_observation" if assignments else "hypothesis",
-                          "outcome": "FAIL" if result_type == "failure" else "INCONCLUSIVE", "conditions": {},
-                          "operations": [{"tool": payload.get("toolName", payload.get("tool_name", "unknown"))}],
-                          "observation": {"tool_transport_result": result_type,
-                                          "runtime_assertions_supplied": False,
-                                          "debugger_assignments": assignments},
-                          "checks": [], "anchors": [],
-                          "uncertainties": ["A successful tool transport is not an app verification."]}
-            ingest(store, event_body)
+            if assignments:
+                event_body = {"schema": "llr.milestone.v1", "workspace": workspace, "session": session,
+                              "task": task_row["task"],
+                              "milestone": "tool-" + digest(canonical(
+                                  [payload.get("timestamp"), payload.get("toolName"),
+                                   payload.get("tool_name"), result_type]).encode())[:24],
+                              "title": task_row["title"],
+                              "kind": "runtime_observation",
+                              "outcome": "FAIL" if result_type == "failure" else "INCONCLUSIVE", "conditions": {},
+                              "operations": [{"tool": tool_name}],
+                              "observation": {"tool_transport_result": result_type,
+                                              "runtime_assertions_supplied": False,
+                                              "debugger_assignments": assignments},
+                              "checks": [], "anchors": [],
+                              "uncertainties": ["A successful tool transport is not an app verification."]}
+                ingest(store, event_body)
+            else:
+                record_tool_trace(store, workspace, task_row["id"], str(tool_name),
+                                  str(result_type), payload.get("timestamp"))
     if event in ("agentStop", "sessionEnd", "notify"):
         # End-of-turn is not proof of task success. Preserve completed milestones separately.
         with store.transaction():
             store.db.execute("UPDATE task_runs SET state='AWAITING_EVIDENCE',updated_at=? "
                              "WHERE session=? AND state='in_progress'", (now(), session))
-    safe_receipt = {"state_home": str(store.home), "workspace": workspace,
-                    "revision": store.revision(), "event": event,
-                    "host_pid": os.getpid(), "adapter_api": "0.4",
-                    "context_injected": context is not None,
-                    "task_state": [item["state"] for item in status(store)["tasks"]
-                                   if item["session"] == session]}
-    with store.transaction():
-        receipt_id = digest(canonical([client, session, event, payload.get("timestamp"),
-                                       payload.get("turn-id"), safe_receipt]).encode())
-        store.db.execute("INSERT OR IGNORE INTO client_receipts VALUES (?,?,?,?,?,?,?)",
-                         (receipt_id, client, session, event, workspace, canonical(safe_receipt), now()))
+    safe_receipt = _record_receipt(store, client, session, event, workspace, payload, context is not None)
     if client == "codex-hooks" and context is not None:
         return {"hookSpecificOutput": {"hookEventName":
                 "SessionStart" if event == "sessionStart" else "UserPromptSubmit",
@@ -288,9 +307,21 @@ def setup_client(store: Store, workspace: str, root: Path, platform: str,
 
 
 def doctor(store: Store) -> Dict[str, Any]:
-    receipts = [dict(row) for row in store.db.execute(
-        "SELECT client,event,session,workspace,created_at FROM client_receipts "
-        "ORDER BY created_at DESC LIMIT 12")]
+    receipts = []
+    for row in store.db.execute(
+            "SELECT client,event,session,workspace,body,created_at FROM client_receipts "
+            "ORDER BY created_at DESC LIMIT 12"):
+        item = {k: row[k] for k in ("client", "event", "session", "workspace", "created_at")}
+        try:
+            parsed = json.loads(row["body"])
+        except ValueError:
+            parsed = {}
+        if isinstance(parsed, dict):
+            if "context_injected" in parsed:
+                item["context_injected"] = parsed["context_injected"]
+            if "gated" in parsed:
+                item["gated"] = parsed["gated"]
+        receipts.append(item)
     return {"status": "OK", "state_home": str(store.home), "host_pid": os.getpid(),
             "registered_workspaces": [dict(row) for row in store.db.execute("SELECT * FROM workspaces")],
             "recent_handoffs": receipts,
