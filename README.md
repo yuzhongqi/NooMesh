@@ -248,7 +248,11 @@ Microsoft Teams **Workflows** webhook notifies your personal chat (for example
 - **Security & anti-spam guards:** Remote URLs must use `https://` on official
   Microsoft Workflows / Power Platform / Office domains (`*.logic.azure.com`,
   `*.api.powerplatform.com`, `*.powerautomate.com`, `*.webhook.office.com`) with
-  redirects refused; SAS query signatures are redacted from `notify-status`,
+  redirects refused; when corporate DLP disables anonymous `?sig=` triggers
+  (`Any user in my tenant` / `Specific users in my tenant`), the notifier
+  automatically acquires a fresh Entra ID Bearer token for
+  `https://service.flow.microsoft.com/` via local Azure CLI (`az`) without
+  persisting tokens. SAS query signatures and tokens are redacted from `notify-status`,
   `doctor`, and receipts. Turns shorter than `--min-duration` (default `30s`) are
   skipped, Codex `Stop` + `notify` events are deduplicated per turn, dispatch runs
   asynchronously in a detached background process so IDE hooks never block, and

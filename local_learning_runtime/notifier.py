@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -186,15 +187,39 @@ def build_teams_payload(store: Store, client: str, workspace: Optional[str],
     }
 
 
+def _acquire_flow_bearer_token() -> str:
+    az_bin = shutil.which("az")
+    if not az_bin:
+        for candidate in ("/opt/homebrew/bin/az", "/usr/local/bin/az"):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                az_bin = candidate
+                break
+    require(bool(az_bin), "Azure CLI ('az') required for tenant-authenticated Teams Workflows webhook")
+    completed = subprocess.run(
+        [az_bin, "account", "get-access-token",
+         "--resource", "https://service.flow.microsoft.com/",
+         "--query", "accessToken", "-o", "tsv"],
+        capture_output=True, text=True, timeout=8,
+    )
+    token = completed.stdout.strip()
+    require(completed.returncode == 0 and bool(token) and " " not in token,
+            "Failed to acquire Power Automate Entra ID token via 'az account get-access-token'")
+    return token
+
+
 def _deliver_sync(store: Store, payload: Dict[str, Any], timeout: float = 5.0) -> Dict[str, Any]:
     cfg = load_notifier_config(store)
     require(cfg is not None and cfg.get("enabled") is True, "Teams notifier is not enabled")
     checked = validate_webhook_url(cfg["webhook_url"])
     raw = canonical(payload).encode("utf-8")
     require(len(raw) <= 16_000, "Notification payload exceeds 16000 bytes")
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    parsed_url = urllib.parse.urlparse(checked["url"])
+    if parsed_url.scheme == "https" and "sig=" not in parsed_url.query:
+        headers["Authorization"] = "Bearer " + _acquire_flow_bearer_token()
     req = urllib.request.Request(
         checked["url"], data=raw,
-        headers={"Content-Type": "application/json; charset=utf-8"},
+        headers=headers,
         method="POST",
     )
     http_status = 0

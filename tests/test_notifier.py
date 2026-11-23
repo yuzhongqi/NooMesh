@@ -76,6 +76,35 @@ class NotifierTests(unittest.TestCase):
         self.assertNotIn("super_secret_sas", json.dumps(status))
         self.assertNotIn("super_secret_sas", json.dumps(doctor(self.store)))
 
+    def test_tenant_authenticated_webhook_attaches_az_bearer_token_without_logging_it(self):
+        from unittest.mock import patch
+        from local_learning_runtime.notifier import send_test_notification
+        tenant_url = "https://env01.e4.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/wf1/triggers/manual/paths/invoke?api-version=1"
+        configure_notifier(self.store, True, tenant_url, min_duration_seconds=30)
+        captured_headers = {}
+
+        class _FakeResp:
+            status = 202
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, limit=4096):
+                return b"Accepted"
+
+        class _FakeOpener:
+            def open(self, req, timeout=5.0):
+                captured_headers.update(dict(req.header_items()))
+                return _FakeResp()
+
+        with patch("local_learning_runtime.notifier._acquire_flow_bearer_token",
+                   return_value="synthetic-aad-jwt"), \
+                patch("urllib.request.build_opener", return_value=_FakeOpener()):
+            res = send_test_notification(self.store, True)
+        self.assertEqual(res["http_status"], 202)
+        self.assertEqual(captured_headers.get("Authorization"), "Bearer synthetic-aad-jwt")
+        self.assertNotIn("synthetic-aad-jwt", json.dumps(notifier_status(self.store)))
+
     def test_min_duration_filter_redaction_and_codex_deduplication(self):
         configure_notifier(self.store, True, self.webhook_url, min_duration_seconds=30)
 
