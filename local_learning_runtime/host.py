@@ -154,6 +154,17 @@ class AgentServer(socketserver.ThreadingUnixStreamServer):
                         tick(store, row["id"])
                     self.last_used = time.monotonic()
                 elif time.monotonic() - self.last_used > self.idle_seconds:
+                    with self.active_lock:
+                        if self.active_requests > 0:
+                            continue
+                    self.working.set()
+                    with self.mission_lock:
+                        from .dream import run_idle_dreams
+                        run_idle_dreams(store)
+                    self.working.clear()
+                    with self.active_lock:
+                        if self.active_requests > 0 or time.monotonic() - self.last_used <= self.idle_seconds:
+                            continue
                     self.stopping.set()
                     self.shutdown()
                     return

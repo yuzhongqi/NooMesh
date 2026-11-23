@@ -172,6 +172,11 @@ def parser() -> argparse.ArgumentParser:
     pruned.add_argument("--vacuum", action="store_true")
     policy = commands.add_parser("authorize-local")
     policy.add_argument("--workspace", action="append", required=True)
+    policy.add_argument("--auto-dream-source", dest="auto_dream_source",
+                        action="store_true", default=None)
+    policy.add_argument("--no-auto-dream-source", dest="auto_dream_source",
+                        action="store_false")
+    policy.add_argument("--dream-interval", type=int)
     policy.add_argument("--approve", action="store_true")
     incoming = commands.add_parser("ingest")
     incoming.add_argument("event")
@@ -354,7 +359,8 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
     if args.command == "prune-noise":
         return prune_noise(store, args.approve, args.vacuum)
     if args.command == "authorize-local":
-        return authorize(store, args.workspace, args.approve)
+        return authorize(store, args.workspace, args.approve,
+                         args.auto_dream_source, args.dream_interval)
     if args.command == "ingest":
         return ingest(store, read_json(args.event))
     if args.command == "task-status":

@@ -226,6 +226,61 @@ class DreamAndMemoTests(unittest.TestCase):
         finally:
             subprocess.run(cmd + ["host-stop"], capture_output=True, timeout=10)
 
+    def test_host_idle_auto_dream_runs_before_shutdown_with_cooldown_and_receipt(self):
+        import threading
+        from local_learning_runtime.clients import doctor
+        from local_learning_runtime.host import AgentServer
+
+        propose_memo(self.store, self.memo_spec(), 0, True)
+        authorize(self.store, ["sample/android"], True,
+                  auto_dream_source=True, dream_interval_seconds=3600)
+        # Introduce unrelated edit so memo enters SOFT_DRIFT.
+        self.source.write_text(
+            "package sample.host\n// idle consolidation check\n"
+            "class HostConfigProvider {\n"
+            "    fun observeInvalidation(): Boolean = true\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            search(self.store, self.repo, "HostConfigProvider", "pre-idle")["matches"][0]["reuse"],
+            "SOFT_DRIFT")
+
+        server = AgentServer(self.store.home, idle_seconds=0.15)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        thread.join(timeout=5)
+        self.assertFalse(thread.is_alive())
+        server.server_close()
+
+        after = search(self.store, self.repo, "HostConfigProvider", "post-idle")["matches"][0]
+        self.assertEqual(after["reuse"], "APPLICABLE")
+        self.assertEqual(after["version"], 2)
+        diag = doctor(self.store)
+        self.assertTrue(diag["auto_dream_source"])
+        idle_receipt = next(r for r in diag["recent_handoffs"] if r["event"] == "autoDreamPass")
+        self.assertEqual(idle_receipt["client"], "host-idle")
+        self.assertEqual(idle_receipt["reanchored"], 1)
+
+        # Immediate second idle shutdown respects cooldown and does not bump version again.
+        self.source.write_text(
+            "package sample.host\n// second edit within cooldown\n"
+            "class HostConfigProvider {\n"
+            "    fun observeInvalidation(): Boolean = true\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        server2 = AgentServer(self.store.home, idle_seconds=0.15)
+        thread2 = threading.Thread(target=server2.serve_forever, daemon=True)
+        thread2.start()
+        thread2.join(timeout=5)
+        self.assertFalse(thread2.is_alive())
+        server2.server_close()
+
+        throttled = search(self.store, self.repo, "HostConfigProvider", "post-cooldown")["matches"][0]
+        self.assertEqual(throttled["version"], 2)
+        self.assertEqual(throttled["reuse"], "SOFT_DRIFT")
+
 
 if __name__ == "__main__":
     unittest.main()

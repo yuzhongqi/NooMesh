@@ -213,6 +213,7 @@ llr export-portal --workspace sample/android --output /private/knowledge-view/ne
   ```sh
   llr dream-pass --workspace sample/android
   llr dream-pass --workspace sample/android --apply --approve
+  llr authorize-local --workspace sample/android --auto-dream-source --dream-interval 43200 --approve
   ```
   Dry-run (`model_calls: 0`, also exposed read-only via MCP `local_learning_dream`)
   reports symbol-valid `reanchorable` items, `broken_anchors`, L1 `theme_repairs`
@@ -221,7 +222,10 @@ llr export-portal --workspace sample/android --output /private/knowledge-view/ne
   `turnaround_episodes` captured in `tool_traces`. With `--apply --approve`, it
   transactionally refreshes verified file SHA-256s, renews source verification
   timestamps, and repairs theme shards—while keeping strict runtime claims gated
-  on real App revalidation.
+  on real App revalidation. When `--auto-dream-source` is enabled, the shared
+  Host automatically runs one throttled `dream-pass` (default once per 12 hours,
+  recorded in `llr doctor` as `host-idle / autoDreamPass`) right before its
+  idle shutdown when no client requests or missions are active.
 
 These checks are wired into claim recall/search, progressive context,
 solution route/execute, dependency checks and context refresh. A pinned old view

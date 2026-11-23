@@ -329,9 +329,16 @@ def doctor(store: Store) -> Dict[str, Any]:
                 item["context_injected"] = parsed["context_injected"]
             if "gated" in parsed:
                 item["gated"] = parsed["gated"]
+            if "reanchored" in parsed:
+                item["reanchored"] = parsed["reanchored"]
+                item["theme_repairs"] = parsed.get("theme_repairs", 0)
         receipts.append(item)
+    policy_path = store.home / "automation.json"
+    policy = json.loads(policy_path.read_text()) if policy_path.is_file() else {}
     return {"status": "OK", "state_home": str(store.home), "host_pid": os.getpid(),
             "registered_workspaces": [dict(row) for row in store.db.execute("SELECT * FROM workspaces")],
+            "auto_dream_source": bool(policy.get("auto_dream_source", False)),
+            "dream_interval_seconds": policy.get("dream_interval_seconds", 43200),
             "recent_handoffs": receipts,
             "client_trust": "Must be verified in the actual client UI; file presence is not invocation.",
             "local_only_default": True, "model_gateway_configured": (store.home / "model-gateway.json").exists(),

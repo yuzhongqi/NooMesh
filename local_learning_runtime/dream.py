@@ -2,13 +2,14 @@
 
 import copy
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
 from .context import DERIVED_THEME_IDS, _theme_anchor_bytes, build_view
 from .core import (MAX_PACKET_BYTES, RuntimeErrorBase, Store, canonical, digest,
                    file_digest, now, require, workspace_file)
-from .lifecycle import SOURCE_PROVENANCE_KINDS, assess, record as record_usage
+from .lifecycle import SOURCE_PROVENANCE_KINDS, assess, parsed, record as record_usage
 from .memos import verify_memo_spec
 
 
@@ -221,3 +222,56 @@ def dream_pass(store: Store, workspace: str, apply: bool = False,
     while len(canonical(result).encode()) > MAX_PACKET_BYTES and result["broken_anchors"]:
         result["broken_anchors"].pop()
     return result
+
+
+def run_idle_dreams(store: Store) -> List[Dict[str, Any]]:
+    policy_path = store.home / "automation.json"
+    if not policy_path.is_file():
+        return []
+    try:
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if policy.get("local_only") is not True or policy.get("auto_dream_source") is not True:
+        return []
+    interval = policy.get("dream_interval_seconds", 43200)
+    if type(interval) is not int or interval < 60:
+        interval = 43200
+    clock = parsed(now())
+    completed: List[Dict[str, Any]] = []
+    for workspace in policy.get("workspaces", []):
+        row = store.db.execute("SELECT root FROM workspaces WHERE id=?", (workspace,)).fetchone()
+        if row is None or not Path(row["root"]).is_dir():
+            continue
+        if store.db.execute("SELECT 1 FROM missions WHERE workspace=? AND state='RUNNING' LIMIT 1",
+                            (workspace,)).fetchone():
+            continue
+        if store.db.execute("SELECT 1 FROM solution_runs WHERE workspace=? AND state='RUNNING' LIMIT 1",
+                            (workspace,)).fetchone():
+            continue
+        state_key = "last_dream:" + workspace
+        last_row = store.db.execute("SELECT value FROM state WHERE key=?", (state_key,)).fetchone()
+        last_ts = parsed(last_row["value"]) if last_row else None
+        if last_ts and clock and (clock - last_ts).total_seconds() < interval:
+            continue
+        report = dream_pass(store, workspace, apply=True, approve=True)
+        ts = now()
+        receipt_body = {
+            "state_home": str(store.home),
+            "workspace": workspace,
+            "event": "autoDreamPass",
+            "host_pid": os.getpid(),
+            "reanchored": len(report["reanchored"]),
+            "theme_repairs": len(report["theme_repairs"]),
+            "broken_anchors": len(report["broken_anchors"]),
+            "model_calls": 0,
+        }
+        receipt_id = digest(canonical(["host-idle", workspace, ts, receipt_body]).encode())
+        with store.transaction():
+            store.db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                             (state_key, ts))
+            store.db.execute("INSERT OR IGNORE INTO client_receipts VALUES (?,?,?,?,?,?,?)",
+                             (receipt_id, "host-idle", "host-idle", "autoDreamPass",
+                              workspace, canonical(receipt_body), ts))
+        completed.append(receipt_body)
+    return completed

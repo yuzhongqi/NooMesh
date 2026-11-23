@@ -88,18 +88,28 @@ def load_policy(store: Store, workspace: str) -> Dict[str, Any]:
     return policy
 
 
-def authorize(store: Store, workspaces: List[str], approve: bool) -> Dict[str, Any]:
+def authorize(store: Store, workspaces: List[str], approve: bool,
+              auto_dream_source: Optional[bool] = None,
+              dream_interval_seconds: Optional[int] = None) -> Dict[str, Any]:
     require(approve, "Explicit local automation preauthorization required")
     for workspace in workspaces:
         store.workspace(workspace)
     path = store.home / "automation.json"
     old = json.loads(path.read_text()) if path.exists() else {}
+    interval = (dream_interval_seconds if dream_interval_seconds is not None
+                else old.get("dream_interval_seconds", 43200))
+    require(type(interval) is int and 60 <= interval <= 7 * 86400,
+            "Dream interval must be 60-604800 seconds")
+    auto_dream = (bool(auto_dream_source) if auto_dream_source is not None
+                  else bool(old.get("auto_dream_source", False)))
     policy = dict(old, local_only=True, auto_publish_predicates=True,
+                  auto_dream_source=auto_dream, dream_interval_seconds=interval,
                   workspaces=sorted(set(old.get("workspaces", []) + workspaces)),
                   max_event_bytes=MAX_EVENT_BYTES)
     path.write_text(canonical(policy), encoding="utf-8")
     path.chmod(0o600)
     return {"status": "AUTHORIZED_LOCAL_ONLY", "workspaces": policy["workspaces"],
+            "auto_dream_source": auto_dream, "dream_interval_seconds": interval,
             "model_calls": 0, "app_actions_authorized": False}
 
 
@@ -730,6 +740,7 @@ def forget_workspace(store: Store, workspace: str, approve: bool) -> Dict[str, A
         store.db.execute("DELETE FROM solutions WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM memo_versions WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM memos WHERE workspace=?", (workspace,))
+        store.db.execute("DELETE FROM state WHERE key=?", ("last_dream:" + workspace,))
         store.db.execute("DELETE FROM themes WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM preferences WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM memory_events WHERE workspace=?", (workspace,))
