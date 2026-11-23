@@ -226,7 +226,7 @@ def _deliver_sync(store: Store, payload: Dict[str, Any], timeout: float = 5.0) -
     ok = False
     try:
         with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as resp:
-            http_status = int(getattr(resp, "status", resp.getcode()))
+            http_status = int(getattr(resp, "status", None) or resp.getcode())
             resp.read(4096)
         ok = 200 <= http_status < 300
     except urllib.error.HTTPError as exc:
