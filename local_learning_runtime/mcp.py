@@ -2,6 +2,7 @@
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict
 
@@ -10,6 +11,7 @@ from .learning import search, status, run_registered
 from .discovery import discover
 from .context import packet
 from .dream import dream_pass
+from .relay import send_interactive_relay, wait_for_interactive_run
 from .solutions import route, execute_solution
 from .lifecycle import maintenance
 from . import __version__
@@ -81,7 +83,21 @@ TOOLS = [
     {"name": "local_learning_status",
      "description": "Explain task capture, validation, publication and missing evidence.",
      "inputSchema": {"type": "object", "properties": {"task_run": {"type": "string"}},
-                     "additionalProperties": False}}
+                     "additionalProperties": False}},
+    {"name": "local_learning_ask_choice",
+     "description": "Send an interactive Adaptive Card with multiple-choice radio buttons and a "
+                    "free-text reply box to the user's Microsoft Teams Workflows private chat, and "
+                    "wait for their mobile decision (works across Codex and VS Code on multiple Macs).",
+     "inputSchema": {"type": "object", "properties": {
+         "question": {"type": "string"},
+         "options": {"type": "array", "minItems": 2, "maxItems": 6,
+                     "items": {"type": "object", "properties": {
+                         "label": {"type": "string"}, "value": {"type": "string"}},
+                         "required": ["label", "value"], "additionalProperties": False}},
+         "session": {"type": "string"},
+         "client": {"type": "string"},
+         "timeout_seconds": {"type": "integer", "minimum": 5, "maximum": 3600}},
+         "required": ["question", "options", "session"], "additionalProperties": False}}
 ]
 
 
@@ -117,6 +133,20 @@ def respond(store: Store, message: Dict[str, Any]) -> Dict[str, Any]:
                                       args["invocation"], args["parameters"], args["conditions"])
         elif params["name"] == "local_learning_status":
             result = status(store, args.get("task_run"))
+        elif params["name"] == "local_learning_ask_choice":
+            client_tag = str(args.get("client") or "Agent")[:24]
+            sent = send_interactive_relay(
+                store, str(args["session"]),
+                f"🤔 [{client_tag}] 当前任务需要你做选择",
+                str(args["question"]), args["options"],
+                update_message="✅ 选择已发回当前 Session！",
+                force=True,
+            )
+            result = wait_for_interactive_run(
+                store, sent["run_id"],
+                timeout_seconds=int(args.get("timeout_seconds", 900)),
+                poll_interval=0.2,
+            )
         elif params["name"] in ("local_learning_validators", "local_learning_validate"):
             found = discover(store, Path(args["cwd"]), args["session"], args.get("platform"))
             require(found["status"] == "DISCOVERED", "Validator workspace discovery: " + found["status"])
@@ -171,7 +201,37 @@ def serve_bridge(home: Path) -> None:
             message = json.loads(line)
             if "id" not in message:
                 continue
-            result = call(home, "mcp", message)
+            if (message.get("method") == "tools/call"
+                    and message.get("params", {}).get("name") == "local_learning_ask_choice"):
+                args = message["params"].get("arguments", {})
+                client_tag = str(args.get("client") or "Agent")[:24]
+                sent = call(home, "command", {
+                    "argv": ["--home", str(home), "relay-send", "--session", str(args["session"])],
+                    "relay_input": {
+                        "heading": f"🤔 [{client_tag}] 当前任务需要你做选择",
+                        "summary": str(args["question"]),
+                        "choices": args["options"],
+                        "update_message": "✅ 选择已发回当前 Session！",
+                        "force": True,
+                    },
+                })
+                deadline = time.monotonic() + min(max(int(args.get("timeout_seconds", 900)), 5), 3600)
+                polled = {"status": "TIMEOUT", "run_id": sent["run_id"]}
+                while time.monotonic() < deadline:
+                    time.sleep(min(2.0, max(0.2, deadline - time.monotonic())))
+                    polled = call(home, "command", {
+                        "argv": ["--home", str(home), "relay-poll", "--run-id", sent["run_id"]]
+                    })
+                    if polled.get("status") != "RUNNING":
+                        break
+                if polled.get("status") == "TIMEOUT":
+                    call(home, "command", {
+                        "argv": ["--home", str(home), "relay-cancel", "--run-id", sent["run_id"]]
+                    })
+                result = {"content": [{"type": "text", "text": canonical(polled)}],
+                          "isError": polled.get("status") != "REPLIED"}
+            else:
+                result = call(home, "mcp", message)
             output = {"jsonrpc": "2.0", "id": message["id"], "result": result}
         except (RuntimeErrorBase, OSError, ValueError, KeyError, TypeError) as exc:
             output = {"jsonrpc": "2.0", "id": message.get("id") if isinstance(message, dict) else None,

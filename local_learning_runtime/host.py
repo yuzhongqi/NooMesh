@@ -103,7 +103,8 @@ def dispatch_request(home: Path, request: Dict[str, Any]) -> Any:
                     "Invalid proxied lifecycle command")
             if args.command == "hook":
                 from .clients import hook
-                return hook(store, args.client, args.event, payload["hook_input"])
+                return hook(store, args.client, args.event, payload["hook_input"],
+                            defer_codex_wait=True)
             if args.command == "notify-config" and "webhook_stdin" in payload:
                 args.webhook_value = payload["webhook_stdin"]
             if args.command == "relay-config" and "webhook_stdin" in payload:

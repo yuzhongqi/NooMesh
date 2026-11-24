@@ -259,24 +259,30 @@ Microsoft Teams **Workflows** webhook notifies your personal chat (for example
   cards carry only sanitized metadata (client, workspace, duration, state, and a
   redacted 90-char summary—never source code or raw transcripts). To pause or
   re-enable: `llr notify-config --disable --approve` / `--enable --approve`.
-- **Bidirectional mobile session relay (`llr relay-*` + `teams-remote` extension):**
-  Pair a Power Automate `PostCardAndWaitForResponse` (`Post adaptive card and wait
-  for a response` → `Compose`) workflow with the user-scoped Copilot SDK extension
-  template [teams-remote-extension.mjs](adapters/teams-remote-extension.mjs)
-  (`~/.copilot/extensions/teams-remote/extension.mjs`):
+- **Bidirectional mobile session relay across multiple Macs, VS Code & Codex:**
+  Pair one Power Automate `PostCardAndWaitForResponse` (`Post adaptive card and wait
+  for a response` → `Compose`) workflow on your Microsoft account with both VS Code
+  Copilot (`setup ... --client copilot` automatically installs
+  [teams-remote-extension.mjs](adapters/teams-remote-extension.mjs) into
+  `~/.copilot/extensions/teams-remote/extension.mjs`) and Codex (`Stop` hook
+  `decision: "block"` continuation + shared `local_learning_ask_choice` MCP tool):
   ```sh
   pbpaste | llr relay-config --webhook-stdin --env-id "<ENV_ID>" --flow-id "<FLOW_ID>" \
-    --min-duration 15 --away-only --away-idle 60 --auto-on-stop --approve
+    --machine-name "MacStudio" --min-duration 15 --away-only --away-idle 60 \
+    --auto-on-stop --approve
   llr relay-status
   ```
-  When `--away-only` is enabled, turns initiated on your computer stay completely
-  silent on Teams while you are at your Mac (`IOConsoleUsers` unlocked and
-  `HIDIdleTime < --away-idle`, default `60s`), and automatically switch to Teams
-  the moment your screen locks or your keyboard/mouse is idle past the threshold.
-  Once you reply from Teams (`turn_source: "teams"`), every follow-up turn replies
-  back to Teams until you send a message on your computer again (which cancels any
-  pending remote card and silences Teams). Mid-turn decisions remain available via
-  the `ask_teams_choice` tool.
+  - **Multi-Mac isolation:** Multiple Macs can share the exact same Teams workflow
+    without interference—each card creates its own Power Automate `run_id` polled
+    only by the originating Mac and session, while `--machine-name` (defaulting to
+    `hostname`) stamps `[Machine · VS Code / Codex]` on both the card header and
+    submit button (`🚀 发回 MacStudio 当前 Session`).
+  - **Presence-aware silencing:** With `--away-only`, local turns stay silent on
+    Teams while you are at that Mac (`IOConsoleUsers` unlocked and
+    `HIDIdleTime < --away-idle`, default `60s`), switch to Teams on screen lock or
+    idle, and keep replying to Teams once a turn originates from Teams until you
+    type at that Mac again. Mid-turn mobile decisions are available in VS Code via
+    `ask_teams_choice` and in both Codex and VS Code via MCP `local_learning_ask_choice`.
 
 These checks are wired into claim recall/search, progressive context,
 solution route/execute, dependency checks and context refresh. A pinned old view

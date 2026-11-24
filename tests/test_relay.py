@@ -163,6 +163,63 @@ class RelayTests(unittest.TestCase):
             self.assertEqual(locked["status"], "WAITING")
             self.assertEqual(len(_MockFlowServer.posted_cards), 2)
 
+    def test_multi_mac_machine_label_codex_stop_continuation_and_mcp_choice(self):
+        import subprocess
+        import sys
+        from local_learning_runtime.mcp import respond
+
+        configure_relay(
+            self.store, True, f"{self.base_url}/relay",
+            environment_id="env-1", flow_id="flow-1",
+            min_duration_seconds=0, away_only=False, machine_name="MacStudio-Desk",
+        )
+        card_info = build_interactive_card(self.store, "sess-m1", "[Codex] Build finished", "All green")
+        card_text = json.dumps(card_info["card"], ensure_ascii=False)
+        self.assertIn("[MacStudio-Desk · Codex]", card_text)
+        self.assertIn("MacStudio-Desk", card_info["card"]["actions"][0]["title"])
+
+        # Simulate mobile user replying right away -> Codex Stop CLI hook returns decision:block
+        _MockFlowServer.run_state = "Succeeded"
+        _MockFlowServer.reply_payload = {
+            "request_id": "req-codex",
+            "response": {"data": {"choice": "__continue__", "reply_text": "run lint next"}},
+        }
+        launcher = Path(__file__).resolve().parents[1] / "tools" / "llr.py"
+        cmd = [sys.executable, str(launcher), "--home", str(self.store.home)]
+        try:
+            prompt_ev = subprocess.run(
+                cmd + ["hook", "--client", "codex-hooks", "--event", "userPromptSubmitted"],
+                input=json.dumps({"session_id": "cx-1", "cwd": str(self.repo), "prompt": "Android build"}).encode(),
+                capture_output=True, timeout=20,
+            )
+            self.assertEqual(prompt_ev.returncode, 0, prompt_ev.stderr.decode())
+            stop_ev = subprocess.run(
+                cmd + ["hook", "--client", "codex-hooks", "--event", "agentStop"],
+                input=json.dumps({"session_id": "cx-1", "cwd": str(self.repo),
+                                  "last_assistant_message": "Build succeeded"}).encode(),
+                capture_output=True, timeout=20,
+            )
+            self.assertEqual(stop_ev.returncode, 0, stop_ev.stderr.decode())
+            stop_out = json.loads(stop_ev.stdout.decode())
+            self.assertEqual(stop_out["decision"], "block")
+            self.assertEqual(stop_out["reason"], "run lint next")
+
+            # Also verify shared MCP local_learning_ask_choice tool
+            mcp_out = respond(self.store, {"method": "tools/call", "params": {
+                "name": "local_learning_ask_choice",
+                "arguments": {
+                    "session": "cx-1", "client": "Codex",
+                    "question": "Pick target",
+                    "options": [{"label": "Debug", "value": "debug"}, {"label": "Ship", "value": "ship"}],
+                    "timeout_seconds": 10,
+                },
+            }})
+            parsed_mcp = json.loads(mcp_out["content"][0]["text"])
+            self.assertEqual(parsed_mcp["status"], "REPLIED")
+            self.assertIn("run lint next", parsed_mcp["prompt"])
+        finally:
+            subprocess.run(cmd + ["host-stop"], capture_output=True, timeout=10)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,8 @@ from .core import RuntimeErrorBase, Store, canonical, digest, now, require
 from .gateway_transport import NoRedirect
 from .learning import privacy_key
 from .lifecycle import parsed
-from .notifier import _acquire_flow_bearer_token, detect_user_presence, validate_webhook_url
+from .notifier import (_acquire_flow_bearer_token, default_machine_name,
+                       detect_user_presence, format_duration, validate_webhook_url)
 from .privacy import sanitize
 
 FLOW_API_HOST = "api.flow.microsoft.com"
@@ -68,7 +69,8 @@ def configure_relay(store: Store, approve: bool,
                     min_duration_seconds: Optional[int] = None,
                     poll_timeout_seconds: Optional[int] = None,
                     away_only: Optional[bool] = None,
-                    away_idle_seconds: Optional[int] = None) -> Dict[str, Any]:
+                    away_idle_seconds: Optional[int] = None,
+                    machine_name: Optional[str] = None) -> Dict[str, Any]:
     require(approve, "Explicit approval required to configure interactive Teams relay")
     existing = load_relay_config(store) or {}
     final_url = (webhook_url.strip() if isinstance(webhook_url, str) and webhook_url.strip()
@@ -91,9 +93,14 @@ def configure_relay(store: Store, approve: bool,
                 else existing.get("away_idle_seconds", 60))
     require(type(idle_sec) is int and 5 <= idle_sec <= 86400,
             "away_idle_seconds must be 5-86400")
+    raw_machine = (machine_name.strip() if isinstance(machine_name, str) and machine_name.strip()
+                   else existing.get("machine_name") or default_machine_name())
+    safe_machine = sanitize(raw_machine[:32], privacy_key(store))[0]
+    require(bool(safe_machine), "machine_name must be nonempty")
     record = {
         "schema": "llr.relay.v1",
         "enabled": bool(enabled if enabled is not None else existing.get("enabled", True)),
+        "machine_name": safe_machine,
         "auto_on_stop": bool(auto_on_stop if auto_on_stop is not None
                              else existing.get("auto_on_stop", True)),
         "away_only": bool(away_only if away_only is not None else existing.get("away_only", False)),
@@ -115,11 +122,12 @@ def configure_relay(store: Store, approve: bool,
 def relay_status(store: Store) -> Dict[str, Any]:
     cfg = load_relay_config(store)
     if not cfg:
-        return {"configured": False, "enabled": False}
+        return {"configured": False, "enabled": False, "machine_name": default_machine_name()}
     checked = validate_webhook_url(cfg["webhook_url"])
     return {
         "configured": True,
         "enabled": bool(cfg.get("enabled", True)),
+        "machine_name": cfg.get("machine_name") or default_machine_name(),
         "auto_on_stop": bool(cfg.get("auto_on_stop", True)),
         "away_only": bool(cfg.get("away_only", False)),
         "away_idle_seconds": int(cfg.get("away_idle_seconds", 60)),
@@ -136,8 +144,17 @@ def build_interactive_card(store: Store, session: str, heading: str,
                            summary: str, choices: Optional[List[Dict[str, str]]] = None,
                            request_id: Optional[str] = None) -> Dict[str, Any]:
     key = privacy_key(store)
+    cfg = load_relay_config(store) or {}
+    machine_label = sanitize((cfg.get("machine_name") or default_machine_name())[:32], key)[0]
     req_id = request_id or ("req-" + uuid.uuid4().hex[:12])
-    safe_heading = sanitize((heading or "VS Code Session")[:140], key)[0]
+    raw_heading = sanitize((heading or "Coding Session")[:140], key)[0]
+    if f"[{machine_label}" not in raw_heading and f"· {machine_label}]" not in raw_heading:
+        if "[" in raw_heading:
+            safe_heading = raw_heading.replace("[", f"[{machine_label} · ", 1)
+        else:
+            safe_heading = f"[{machine_label}] {raw_heading}"
+    else:
+        safe_heading = raw_heading
     safe_summary = sanitize((summary or "Task turn completed.")[:1200], key)[0]
     normalized_choices = []
     if choices:
@@ -177,7 +194,7 @@ def build_interactive_card(store: Store, session: str, heading: str,
             },
             {
                 "type": "TextBlock",
-                "text": f"Session: {session[:12]} · Request: {req_id}",
+                "text": f"Machine: {machine_label} · Session: {session[:12]} · Request: {req_id}",
                 "isSubtle": True,
                 "size": "Small",
                 "wrap": True,
@@ -185,11 +202,11 @@ def build_interactive_card(store: Store, session: str, heading: str,
         ],
         "actions": [{
             "type": "Action.Submit",
-            "title": "🚀 发送回当前 Session",
-            "data": {"request_id": req_id, "session": session[:36]},
+            "title": f"🚀 发回 {machine_label} 当前 Session",
+            "data": {"request_id": req_id, "session": session[:36], "machine": machine_label},
         }],
     }
-    return {"request_id": req_id, "card": card}
+    return {"request_id": req_id, "machine_name": machine_label, "card": card}
 
 
 def send_interactive_relay(store: Store, session: str, heading: str,
@@ -256,6 +273,13 @@ def _flow_api_get(store: Store, url: str) -> Dict[str, Any]:
         return json.loads(resp.read(256_000).decode("utf-8"))
 
 
+def _default_flow_api_root(cfg: Dict[str, Any]) -> str:
+    parsed_wh = urllib.parse.urlparse(cfg.get("webhook_url", ""))
+    if parsed_wh.scheme == "http" and parsed_wh.hostname in ("127.0.0.1", "localhost") and parsed_wh.port:
+        return f"http://{parsed_wh.hostname}:{parsed_wh.port}"
+    return f"https://{FLOW_API_HOST}/providers/Microsoft.ProcessSimple"
+
+
 def poll_interactive_run(store: Store, run_id: str,
                          base_api_url: Optional[str] = None) -> Dict[str, Any]:
     cfg = load_relay_config(store)
@@ -264,7 +288,7 @@ def poll_interactive_run(store: Store, run_id: str,
             "Invalid workflow run_id")
     env_id = cfg["environment_id"]
     flow_id = cfg["flow_id"]
-    api_root = base_api_url or f"https://{FLOW_API_HOST}/providers/Microsoft.ProcessSimple"
+    api_root = base_api_url or _default_flow_api_root(cfg)
     run_url = f"{api_root}/environments/{env_id}/flows/{flow_id}/runs/{run_id}?api-version=2016-11-01"
     run_data = _flow_api_get(store, run_url)
     run_status = run_data.get("properties", {}).get("status", "Unknown")
@@ -340,11 +364,14 @@ def cancel_interactive_run(store: Store, session: Optional[str] = None,
         return {"status": "NO_ACTIVE_RUN"}
     env_id = cfg["environment_id"]
     flow_id = cfg["flow_id"]
-    cancel_url = (f"https://{FLOW_API_HOST}/providers/Microsoft.ProcessSimple"
-                  f"/environments/{env_id}/flows/{flow_id}/runs/{target_run}/cancel?api-version=2016-11-01")
+    api_root = _default_flow_api_root(cfg)
+    cancel_url = f"{api_root}/environments/{env_id}/flows/{flow_id}/runs/{target_run}/cancel?api-version=2016-11-01"
+    cancel_headers = {}
+    if urllib.parse.urlparse(cancel_url).hostname == FLOW_API_HOST:
+        cancel_headers["Authorization"] = "Bearer " + _cached_bearer_token(store)
     req = urllib.request.Request(
         cancel_url, data=b"",
-        headers={"Authorization": "Bearer " + _cached_bearer_token(store)},
+        headers=cancel_headers,
         method="POST",
     )
     try:
@@ -355,3 +382,67 @@ def cancel_interactive_run(store: Store, session: Optional[str] = None,
     except OSError:
         code = 0
     return {"status": "CANCEL_REQUESTED", "run_id": target_run, "http_status": code}
+
+
+def set_codex_remote_turn(store: Store, session: str, active: bool) -> Dict[str, Any]:
+    key = "codex_remote_turn:" + session[:64]
+    with store.transaction():
+        if active:
+            store.db.execute(
+                "INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, now()))
+        else:
+            store.db.execute("DELETE FROM state WHERE key=?", (key,))
+    return {"session": session, "codex_remote_turn": active}
+
+
+def maybe_start_codex_relay(store: Store, session: str, workspace: Optional[str],
+                            payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    cfg = load_relay_config(store)
+    if not cfg or not cfg.get("enabled", True) or not cfg.get("auto_on_stop", True):
+        return None
+    with store.transaction():
+        store.db.execute(
+            "INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("relay_session:" + session[:64], now()))
+    remote_flag = bool(payload.get("stop_hook_active")) or bool(
+        store.db.execute("SELECT 1 FROM state WHERE key=?",
+                         ("codex_remote_turn:" + session[:64],)).fetchone()
+    )
+    turn_source = "teams" if remote_flag else "local"
+    start_row = store.db.execute(
+        "SELECT created_at,body FROM client_receipts WHERE session=? "
+        "AND event IN ('userPromptSubmitted','sessionStart','agentStop') "
+        "ORDER BY created_at DESC LIMIT 1", (session,)).fetchone()
+    clock = parsed(now())
+    started_at = parsed(start_row["created_at"]) if start_row else None
+    duration = max(0.0, (clock - started_at).total_seconds()) if (clock and started_at) else 0.0
+    start_meta = json.loads(start_row["body"]) if start_row else {}
+    task_row = store.db.execute(
+        "SELECT title FROM task_runs WHERE session=? ORDER BY updated_at DESC LIMIT 1",
+        (session,)).fetchone()
+    assistant_text = (payload.get("last_assistant_message")
+                      or payload.get("response")
+                      or payload.get("finalMessage") or "")
+    fallback_title = (task_row["title"] if task_row else start_meta.get("prompt_summary") or "")
+    summary = (str(assistant_text).strip()
+               or (f"已完成：{fallback_title}\n可在下方输入指令继续当前 Codex Session。"
+                   if fallback_title else "Codex 当前轮次已执行完毕，可在下方输入指令继续执行。"))
+    cwd = str(payload.get("cwd") or "")
+    cwd_tail = "/".join(Path(cwd).parts[-2:]) if cwd else (workspace or "workspace")
+    heading = f"✅ [Codex] 任务阶段完成 ({format_duration(duration)}) · {workspace or cwd_tail}"
+    sent = send_interactive_relay(
+        store, session, heading, summary,
+        update_message="✅ 指令已送达当前 Codex Session，正在继续执行！",
+        turn_source=turn_source, elapsed_seconds=duration, force=False,
+    )
+    if sent.get("status") != "WAITING":
+        if sent.get("status") == "SKIPPED_USER_AT_COMPUTER":
+            set_codex_remote_turn(store, session, False)
+        return {"skipped": sent.get("status")}
+    return {
+        "run_id": sent["run_id"],
+        "session": session,
+        "timeout_seconds": int(cfg.get("poll_timeout_seconds", 1800)),
+    }
+

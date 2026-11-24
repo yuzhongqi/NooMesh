@@ -3,9 +3,11 @@
 import argparse
 import json
 import os
+import signal
 import sqlite3
 import subprocess
 import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -27,7 +29,7 @@ from .memos import invalidate_memo, propose_memo
 from .notifier import configure_notifier, notifier_status, send_test_notification
 from .probes import android_node
 from .relay import (cancel_interactive_run, configure_relay, poll_interactive_run,
-                    relay_status, send_interactive_relay)
+                    relay_status, send_interactive_relay, set_codex_remote_turn)
 from .solutions import propose_solution, execute_solution, route, invalidate_solution
 from .context import packet, define_theme, refresh_context
 from .missions import create_mission, mission_status, control, tick
@@ -91,6 +93,7 @@ def parser() -> argparse.ArgumentParser:
     notify_cfg.add_argument("--away-only", dest="away_only", action="store_true", default=None)
     notify_cfg.add_argument("--always-send", dest="away_only", action="store_false")
     notify_cfg.add_argument("--away-idle", type=int)
+    notify_cfg.add_argument("--machine-name")
     notify_cfg.add_argument("--approve", action="store_true")
     commands.add_parser("notify-status")
     notify_test = commands.add_parser("notify-test")
@@ -104,6 +107,7 @@ def parser() -> argparse.ArgumentParser:
     relay_cfg.add_argument("--away-only", dest="away_only", action="store_true", default=None)
     relay_cfg.add_argument("--always-send", dest="away_only", action="store_false")
     relay_cfg.add_argument("--away-idle", type=int)
+    relay_cfg.add_argument("--machine-name")
     relay_cfg.add_argument("--enable", dest="enabled", action="store_true", default=None)
     relay_cfg.add_argument("--disable", dest="enabled", action="store_false")
     relay_cfg.add_argument("--auto-on-stop", dest="auto_on_stop", action="store_true", default=None)
@@ -112,6 +116,9 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("relay-status")
     relay_reg = commands.add_parser("relay-register")
     relay_reg.add_argument("--session", required=True)
+    relay_mark = commands.add_parser("relay-mark-codex")
+    relay_mark.add_argument("--session", required=True)
+    relay_mark.add_argument("--active", action="store_true")
     relay_send_cmd = commands.add_parser("relay-send")
     relay_send_cmd.add_argument("--session", required=True)
     relay_poll_cmd = commands.add_parser("relay-poll")
@@ -361,7 +368,7 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
             url = os.environ.get("LLR_TEAMS_WEBHOOK_URL")
         return configure_notifier(store, args.approve, url, args.min_duration,
                                   args.enabled, args.include_unregistered,
-                                  args.away_only, args.away_idle)
+                                  args.away_only, args.away_idle, args.machine_name)
     if args.command == "notify-status":
         return notifier_status(store)
     if args.command == "notify-test":
@@ -370,9 +377,12 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         url = getattr(args, "webhook_value", None) or os.environ.get("LLR_TEAMS_RELAY_URL")
         return configure_relay(store, args.approve, url, args.env_id, args.flow_id,
                                args.enabled, args.auto_on_stop, args.min_duration,
-                               args.poll_timeout, args.away_only, args.away_idle)
+                               args.poll_timeout, args.away_only, args.away_idle,
+                               args.machine_name)
     if args.command == "relay-status":
         return relay_status(store)
+    if args.command == "relay-mark-codex":
+        return set_codex_remote_turn(store, args.session, args.active)
     if args.command == "relay-register":
         from .core import now
         with store.transaction():
@@ -534,6 +544,47 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
     raise RuntimeErrorBase("Unknown command")
 
 
+def _await_codex_relay_via_ipc(home: Path, wait_spec: dict, base_output: dict) -> dict:
+    from .host import call
+    run_id = wait_spec["run_id"]
+    session = wait_spec["session"]
+    deadline = time.monotonic() + min(max(int(wait_spec.get("timeout_seconds", 1800)), 5), 3600)
+    interrupted = False
+
+    def _on_term(*_args):
+        nonlocal interrupted
+        interrupted = True
+
+    old_term = signal.signal(signal.SIGTERM, _on_term)
+    try:
+        while time.monotonic() < deadline and not interrupted:
+            polled = call(home, "command", {
+                "argv": ["--home", str(home), "relay-poll", "--run-id", run_id]
+            })
+            if polled.get("status") != "RUNNING":
+                if polled.get("status") == "REPLIED" and polled.get("should_continue") and polled.get("prompt"):
+                    call(home, "command", {
+                        "argv": ["--home", str(home), "relay-mark-codex", "--session", session, "--active"]
+                    })
+                    return {
+                        "decision": "block",
+                        "reason": polled["prompt"],
+                        "systemMessage": "📱 Continuing Codex session from Teams reply",
+                    }
+                call(home, "command", {
+                    "argv": ["--home", str(home), "relay-mark-codex", "--session", session]
+                })
+                return base_output
+            time.sleep(min(2.0, max(0.2, deadline - time.monotonic())))
+    except KeyboardInterrupt:
+        interrupted = True
+    finally:
+        signal.signal(signal.SIGTERM, old_term)
+    call(home, "command", {"argv": ["--home", str(home), "relay-cancel", "--run-id", run_id]})
+    call(home, "command", {"argv": ["--home", str(home), "relay-mark-codex", "--session", session]})
+    return base_output
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     arguments = list(argv) if argv is not None else sys.argv[1:]
     args = parser().parse_args(arguments)
@@ -565,6 +616,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 require(len(raw_body) <= 64_000, "Relay input too large")
                 payload["relay_input"] = json.loads(raw_body)
             output = call(args.home, "command", payload)
+            if args.command == "hook" and isinstance(output, dict) and "_await_relay" in output:
+                wait_spec = output.pop("_await_relay")
+                output = _await_codex_relay_via_ipc(args.home, wait_spec, output)
         print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
         if isinstance(output, dict) and output.get("error"):
             return 1

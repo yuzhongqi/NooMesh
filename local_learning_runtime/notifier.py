@@ -5,6 +5,7 @@ import os
 import plistlib
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import urllib.error
@@ -109,13 +110,22 @@ def load_notifier_config(store: Store) -> Optional[Dict[str, Any]]:
     return data
 
 
+def default_machine_name() -> str:
+    try:
+        host = socket.gethostname().split(".")[0].strip()
+    except OSError:
+        host = ""
+    return (host or "mac")[:32]
+
+
 def configure_notifier(store: Store, approve: bool,
                        webhook_url: Optional[str] = None,
                        min_duration_seconds: Optional[int] = None,
                        enabled: Optional[bool] = None,
                        include_unregistered: Optional[bool] = None,
                        away_only: Optional[bool] = None,
-                       away_idle_seconds: Optional[int] = None) -> Dict[str, Any]:
+                       away_idle_seconds: Optional[int] = None,
+                       machine_name: Optional[str] = None) -> Dict[str, Any]:
     require(approve, "Explicit approval required to configure external webhook notifications")
     existing = load_notifier_config(store) or {}
     final_url = webhook_url.strip() if isinstance(webhook_url, str) and webhook_url.strip() else existing.get("webhook_url")
@@ -129,6 +139,10 @@ def configure_notifier(store: Store, approve: bool,
                 else existing.get("away_idle_seconds", 60))
     require(type(idle_sec) is int and 5 <= idle_sec <= 86400,
             "away_idle_seconds must be 5-86400")
+    raw_machine = (machine_name.strip() if isinstance(machine_name, str) and machine_name.strip()
+                   else existing.get("machine_name") or default_machine_name())
+    safe_machine = sanitize(raw_machine[:32], privacy_key(store))[0]
+    require(bool(safe_machine), "machine_name must be nonempty")
     is_enabled = enabled if enabled is not None else existing.get("enabled", True)
     unregistered = (include_unregistered if include_unregistered is not None
                     else existing.get("include_unregistered", True))
@@ -137,6 +151,7 @@ def configure_notifier(store: Store, approve: bool,
         "schema": "llr.notifier.v1",
         "kind": "teams_workflows",
         "enabled": bool(is_enabled),
+        "machine_name": safe_machine,
         "webhook_url": checked["url"],
         "host": checked["host"],
         "masked_url": checked["masked_url"],
@@ -167,11 +182,13 @@ def notifier_status(store: Store) -> Dict[str, Any]:
             "workspace": parsed_body.get("workspace"),
         }
     if not cfg:
-        return {"configured": False, "enabled": False, "last_delivery": last_delivery}
+        return {"configured": False, "enabled": False,
+                "machine_name": default_machine_name(), "last_delivery": last_delivery}
     return {
         "configured": True,
         "kind": cfg.get("kind", "teams_workflows"),
         "enabled": bool(cfg.get("enabled", False)),
+        "machine_name": cfg.get("machine_name") or default_machine_name(),
         "host": cfg.get("host"),
         "masked_url": cfg.get("masked_url"),
         "min_duration_seconds": cfg.get("min_duration_seconds", 30),
@@ -209,9 +226,12 @@ def build_teams_payload(store: Store, client: str, workspace: Optional[str],
         "mission": "LLR Mission",
         "manual-test": "LLR Notify Test",
     }.get(client, str(client)[:32])
+    cfg = load_notifier_config(store) or {}
+    machine_label = sanitize((cfg.get("machine_name") or default_machine_name())[:32], key)[0]
     duration_text = format_duration(duration_seconds)
-    heading = f"[{client_label}] Task finished ({duration_text}) · {safe_ws}"
+    heading = f"[{machine_label} · {client_label}] Task finished ({duration_text}) · {safe_ws}"
     facts = [
+        {"title": "Machine", "value": machine_label},
         {"title": "Client", "value": client_label},
         {"title": "Workspace", "value": safe_ws},
         {"title": "Duration", "value": duration_text},
@@ -239,6 +259,7 @@ def build_teams_payload(store: Store, client: str, workspace: Optional[str],
         "llr": {
             "schema": "llr.notification.v1",
             "event": event_kind,
+            "machine": machine_label,
             "client": client_label,
             "workspace": safe_ws,
             "duration_seconds": round(duration_seconds, 1),
@@ -334,7 +355,7 @@ def dispatch_background(home: Path, payload: Dict[str, Any]) -> None:
 
 def maybe_notify_turn_end(store: Store, client: str, session: str,
                           workspace: Optional[str], sync: bool = False) -> Dict[str, Any]:
-    if client == "copilot":
+    if client in ("copilot", "codex", "codex-hooks"):
         from .relay import load_relay_config
         relay_cfg = load_relay_config(store)
         if (relay_cfg and relay_cfg.get("enabled", True) and relay_cfg.get("auto_on_stop", True)

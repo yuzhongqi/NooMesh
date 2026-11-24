@@ -15,6 +15,8 @@ from .learning import (begin_task, ingest, load_policy, privacy_key, record_tool
                        search, status)
 from .notifier import maybe_notify_turn_end, notifier_status
 from .privacy import sanitize
+from .relay import (cancel_interactive_run, maybe_start_codex_relay, relay_status,
+                    set_codex_remote_turn, wait_for_interactive_run)
 from .context import is_workspace_relevant, packet, session_index
 
 
@@ -42,12 +44,16 @@ def _record_receipt(store: Store, client: str, session: str, event: str,
     return safe_receipt
 
 
-def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def hook(store: Store, client: str, event: str, payload: Dict[str, Any],
+         defer_codex_wait: bool = False) -> Dict[str, Any]:
     require(len(canonical(payload).encode()) <= 256_000, "Hook input exceeds 256000 bytes")
     session = payload.get("sessionId") or payload.get("session_id") or payload.get("thread-id")
     cwd = payload.get("cwd")
     require(isinstance(session, str) and isinstance(cwd, str),
             "Client did not supply stable session ID/cwd; event not recorded")
+    if event == "userPromptSubmitted" and client in ("codex", "codex-hooks"):
+        set_codex_remote_turn(store, session, False)
+        cancel_interactive_run(store, session=session)
     prompt = payload.get("prompt") or payload.get("initialPrompt") or payload.get("initial_prompt")
     prompt_text = prompt[:2000] if isinstance(prompt, str) else ""
     context = None
@@ -72,8 +78,21 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
             _record_receipt(store, client, session, event, None, payload, False,
                             found["status"].lower(), prompt_text)
         if event in ("agentStop", "notify"):
+            codex_wait = (maybe_start_codex_relay(store, session, None, payload)
+                          if client == "codex-hooks" and event == "agentStop" else None)
             maybe_notify_turn_end(store, client, session, None)
             _record_receipt(store, client, session, event, None, payload, False)
+            if codex_wait and codex_wait.get("run_id"):
+                if defer_codex_wait:
+                    return {"_await_relay": codex_wait}
+                polled = wait_for_interactive_run(store, codex_wait["run_id"],
+                                                  codex_wait["timeout_seconds"], poll_interval=0.2)
+                if polled.get("status") == "REPLIED" and polled.get("should_continue") and polled.get("prompt"):
+                    set_codex_remote_turn(store, session, True)
+                    return {"decision": "block", "reason": polled["prompt"],
+                            "systemMessage": "📱 Continuing Codex session from Teams reply"}
+                set_codex_remote_turn(store, session, False)
+                return {}
         if client == "codex-hooks" and event in ("sessionStart", "userPromptSubmitted"):
             return {"hookSpecificOutput": {
                 "hookEventName": "SessionStart" if event == "sessionStart" else "UserPromptSubmit",
@@ -168,11 +187,14 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
                 record_tool_trace(store, workspace, task_row["id"], str(tool_name),
                                   str(result_type), payload.get("timestamp"),
                                   detail=failure_detail)
+    codex_wait = None
     if event in ("agentStop", "sessionEnd", "notify"):
         # End-of-turn is not proof of task success. Preserve completed milestones separately.
         with store.transaction():
             store.db.execute("UPDATE task_runs SET state='AWAITING_EVIDENCE',updated_at=? "
                              "WHERE session=? AND state='in_progress'", (now(), session))
+        if client == "codex-hooks" and event == "agentStop":
+            codex_wait = maybe_start_codex_relay(store, session, workspace, payload)
         if event in ("agentStop", "notify"):
             maybe_notify_turn_end(store, client, session, workspace)
     safe_receipt = _record_receipt(
@@ -183,7 +205,19 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any]) -> Dict
                 "SessionStart" if event == "sessionStart" else "UserPromptSubmit",
                 "additionalContext": canonical(context)}}
     if client == "codex-hooks" and event == "agentStop":
-        return {"systemMessage": "Local learning task status: " + canonical(safe_receipt["task_state"])}
+        base_stop = {"systemMessage": "Local learning task status: " + canonical(safe_receipt["task_state"])}
+        if codex_wait and codex_wait.get("run_id"):
+            if defer_codex_wait:
+                base_stop["_await_relay"] = codex_wait
+                return base_stop
+            polled = wait_for_interactive_run(store, codex_wait["run_id"],
+                                              codex_wait["timeout_seconds"], poll_interval=0.2)
+            if polled.get("status") == "REPLIED" and polled.get("should_continue") and polled.get("prompt"):
+                set_codex_remote_turn(store, session, True)
+                return {"decision": "block", "reason": polled["prompt"],
+                        "systemMessage": "📱 Continuing Codex session from Teams reply"}
+            set_codex_remote_turn(store, session, False)
+        return base_stop
     return {"additionalContext": canonical(context)} if context is not None else {}
 
 
@@ -200,7 +234,7 @@ def install_codex_hooks(store: Store, root: Path, profile: Path, approve: bool) 
                                           "timeout": 10, "additionalContextLimit": 2000}
                                          if name in ("SessionStart", "UserPromptSubmit") else {
                                           "type": "command", "command": command + " --event " + event,
-                                          "timeout": 10}]}] for name, event in events.items()}}
+                                          "timeout": 1800 if name == "Stop" else 10}]}] for name, event in events.items()}}
     target = profile.expanduser() / "hooks.json"
     if target.exists():
         existing = json.loads(target.read_text())
@@ -238,8 +272,14 @@ def install_copilot(store: Store, root: Path, profile: Path, approve: bool) -> D
     mcp_config["mcpServers"]["local_learning"] = entry
     mcp_path.write_text(json.dumps(mcp_config, indent=2), encoding="utf-8")
     mcp_path.chmod(0o600)
+    ext_template = root.resolve() / "adapters" / "teams-remote-extension.mjs"
+    ext_target = profile.expanduser() / "extensions" / "teams-remote" / "extension.mjs"
+    if ext_template.is_file():
+        ext_target.parent.mkdir(parents=True, exist_ok=True)
+        ext_target.write_text(ext_template.read_text(encoding="utf-8"), encoding="utf-8")
     return {"status": "INSTALLED_NOT_YET_ATTESTED", "path": str(target),
             "events": list(events), "mcp_config": str(mcp_path),
+            "teams_remote_extension": str(ext_target) if ext_template.is_file() else None,
             "notice": "Actual harness must load and invoke these hooks."}
 
 
@@ -356,6 +396,7 @@ def doctor(store: Store) -> Dict[str, Any]:
             "auto_dream_source": bool(policy.get("auto_dream_source", False)),
             "dream_interval_seconds": policy.get("dream_interval_seconds", 43200),
             "teams_notifier": notifier_status(store),
+            "teams_relay": relay_status(store),
             "recent_handoffs": receipts,
             "client_trust": "Must be verified in the actual client UI; file presence is not invocation.",
             "local_only_default": True, "model_gateway_configured": (store.home / "model-gateway.json").exists(),
