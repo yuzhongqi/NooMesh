@@ -106,6 +106,10 @@ def dispatch_request(home: Path, request: Dict[str, Any]) -> Any:
                 return hook(store, args.client, args.event, payload["hook_input"])
             if args.command == "notify-config" and "webhook_stdin" in payload:
                 args.webhook_value = payload["webhook_stdin"]
+            if args.command == "relay-config" and "webhook_stdin" in payload:
+                args.webhook_value = payload["webhook_stdin"]
+            if args.command == "relay-send" and "relay_input" in payload:
+                args.relay_payload = payload["relay_input"]
             if args.command == "notify":
                 from .clients import codex_notify
                 return codex_notify(store, json.loads(args.payload))

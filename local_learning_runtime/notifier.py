@@ -272,6 +272,13 @@ def dispatch_background(home: Path, payload: Dict[str, Any]) -> None:
 
 def maybe_notify_turn_end(store: Store, client: str, session: str,
                           workspace: Optional[str], sync: bool = False) -> Dict[str, Any]:
+    if client == "copilot":
+        from .relay import load_relay_config
+        relay_cfg = load_relay_config(store)
+        if (relay_cfg and relay_cfg.get("enabled", True) and relay_cfg.get("auto_on_stop", True)
+                and store.db.execute("SELECT 1 FROM state WHERE key=?",
+                                     ("relay_session:" + session[:64],)).fetchone()):
+            return {"status": "DELEGATED_TO_INTERACTIVE_RELAY"}
     cfg = load_notifier_config(store)
     if not cfg or not cfg.get("enabled", False):
         return {"status": "DISABLED"}

@@ -259,6 +259,22 @@ Microsoft Teams **Workflows** webhook notifies your personal chat (for example
   cards carry only sanitized metadata (client, workspace, duration, state, and a
   redacted 90-char summary—never source code or raw transcripts). To pause or
   re-enable: `llr notify-config --disable --approve` / `--enable --approve`.
+- **Bidirectional mobile session relay (`llr relay-*` + `teams-remote` extension):**
+  Pair a Power Automate `PostCardAndWaitForResponse` (`Post adaptive card and wait
+  for a response` → `Compose`) workflow with the user-scoped Copilot SDK extension
+  template [teams-remote-extension.mjs](adapters/teams-remote-extension.mjs)
+  (`~/.copilot/extensions/teams-remote/extension.mjs`):
+  ```sh
+  pbpaste | llr relay-config --webhook-stdin --env-id "<ENV_ID>" --flow-id "<FLOW_ID>" \
+    --min-duration 15 --auto-on-stop --approve
+  llr relay-status
+  ```
+  When a turn finishes (`onAgentStop`), the extension sends a sanitized result
+  summary with radio actions and a multiline `Input.Text` box to your private Teams
+  chat, polls the outbound Power Automate run status (`x-ms-workflow-run-id`), and
+  injects your mobile reply straight back into the live session via `session.send()`
+  (or mid-turn via the `ask_teams_choice` tool without ending the turn). Typing at
+  your local keyboard automatically cancels any pending remote card run.
 
 These checks are wired into claim recall/search, progressive context,
 solution route/execute, dependency checks and context refresh. A pinned old view

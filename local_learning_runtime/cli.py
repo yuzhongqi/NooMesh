@@ -26,6 +26,8 @@ from .mcp import serve
 from .memos import invalidate_memo, propose_memo
 from .notifier import configure_notifier, notifier_status, send_test_notification
 from .probes import android_node
+from .relay import (cancel_interactive_run, configure_relay, poll_interactive_run,
+                    relay_status, send_interactive_relay)
 from .solutions import propose_solution, execute_solution, route, invalidate_solution
 from .context import packet, define_theme, refresh_context
 from .missions import create_mission, mission_status, control, tick
@@ -90,6 +92,27 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("notify-status")
     notify_test = commands.add_parser("notify-test")
     notify_test.add_argument("--approve", action="store_true")
+    relay_cfg = commands.add_parser("relay-config")
+    relay_cfg.add_argument("--webhook-stdin", action="store_true")
+    relay_cfg.add_argument("--env-id")
+    relay_cfg.add_argument("--flow-id")
+    relay_cfg.add_argument("--min-duration", type=int)
+    relay_cfg.add_argument("--poll-timeout", type=int)
+    relay_cfg.add_argument("--enable", dest="enabled", action="store_true", default=None)
+    relay_cfg.add_argument("--disable", dest="enabled", action="store_false")
+    relay_cfg.add_argument("--auto-on-stop", dest="auto_on_stop", action="store_true", default=None)
+    relay_cfg.add_argument("--manual-only", dest="auto_on_stop", action="store_false")
+    relay_cfg.add_argument("--approve", action="store_true")
+    commands.add_parser("relay-status")
+    relay_reg = commands.add_parser("relay-register")
+    relay_reg.add_argument("--session", required=True)
+    relay_send_cmd = commands.add_parser("relay-send")
+    relay_send_cmd.add_argument("--session", required=True)
+    relay_poll_cmd = commands.add_parser("relay-poll")
+    relay_poll_cmd.add_argument("--run-id", required=True)
+    relay_cancel_cmd = commands.add_parser("relay-cancel")
+    relay_cancel_cmd.add_argument("--session")
+    relay_cancel_cmd.add_argument("--run-id")
     preference = commands.add_parser("preference")
     preference.add_argument("id")
     preference.add_argument("--text", required=True)
@@ -336,6 +359,34 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         return notifier_status(store)
     if args.command == "notify-test":
         return send_test_notification(store, args.approve)
+    if args.command == "relay-config":
+        url = getattr(args, "webhook_value", None) or os.environ.get("LLR_TEAMS_RELAY_URL")
+        return configure_relay(store, args.approve, url, args.env_id, args.flow_id,
+                               args.enabled, args.auto_on_stop, args.min_duration,
+                               args.poll_timeout)
+    if args.command == "relay-status":
+        return relay_status(store)
+    if args.command == "relay-register":
+        from .core import now
+        with store.transaction():
+            store.db.execute(
+                "INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("relay_session:" + args.session[:64], now()))
+        return relay_status(store)
+    if args.command == "relay-send":
+        body = getattr(args, "relay_payload", None)
+        if body is None:
+            raw = sys.stdin.buffer.read(64_001)
+            require(len(raw) <= 64_000, "Relay input too large")
+            body = json.loads(raw)
+        return send_interactive_relay(
+            store, args.session, str(body.get("heading", "")),
+            str(body.get("summary", "")), body.get("choices"),
+            str(body.get("update_message", "✅ 已发回电脑当前 Session！")))
+    if args.command == "relay-poll":
+        return poll_interactive_run(store, args.run_id)
+    if args.command == "relay-cancel":
+        return cancel_interactive_run(store, args.session, args.run_id)
     if args.command == "context":
         return packet(store, args.cwd, args.query, args.session, args.level,
                       args.node, args.revision, args.cursor, args.budget)
@@ -495,10 +546,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 raw = sys.stdin.buffer.read(256_001)
                 require(len(raw) <= 256_000, "Hook input too large")
                 payload["hook_input"] = json.loads(raw)
-            elif args.command == "notify-config" and args.webhook_stdin:
+            elif args.command in ("notify-config", "relay-config") and args.webhook_stdin:
                 raw_url = sys.stdin.buffer.read(8001)
                 require(len(raw_url) <= 8000, "Webhook URL input too large")
                 payload["webhook_stdin"] = raw_url.decode("utf-8").strip()
+            elif args.command == "relay-send":
+                raw_body = sys.stdin.buffer.read(64_001)
+                require(len(raw_body) <= 64_000, "Relay input too large")
+                payload["relay_input"] = json.loads(raw_body)
             output = call(args.home, "command", payload)
         print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
         if isinstance(output, dict) and output.get("error"):
