@@ -128,6 +128,41 @@ class RelayTests(unittest.TestCase):
         card = build_interactive_card(self.store, "s-interactive", "Done", "Summary")
         self.assertEqual(card["card"]["type"], "AdaptiveCard")
 
+    def test_away_only_presence_gating_stops_teams_when_chatting_at_computer(self):
+        from unittest.mock import patch
+        configure_relay(
+            self.store, True, f"{self.base_url}/relay",
+            environment_id="env-1", flow_id="flow-1",
+            min_duration_seconds=15, away_only=True, away_idle_seconds=60,
+        )
+        # 1) User actively using computer (unlocked, 4s HID idle) -> skipped
+        with patch("local_learning_runtime.relay.detect_user_presence",
+                   return_value={"screen_locked": False, "hid_idle_seconds": 4.0, "user_away": False}):
+            skipped = send_interactive_relay(
+                self.store, "s1", "Done", "Summary",
+                turn_source="local", elapsed_seconds=45.0,
+            )
+            self.assertEqual(skipped["status"], "SKIPPED_USER_AT_COMPUTER")
+            self.assertEqual(len(_MockFlowServer.posted_cards), 0)
+
+            # 2) Turn initiated from mobile Teams replies back even if Mac unlocked & fast (<15s)
+            remote_reply = send_interactive_relay(
+                self.store, "s1", "Done", "Fast mobile reply",
+                turn_source="teams", elapsed_seconds=2.0,
+            )
+            self.assertEqual(remote_reply["status"], "WAITING")
+            self.assertEqual(len(_MockFlowServer.posted_cards), 1)
+
+        # 3) Screen locked -> sends immediately even on a short local turn
+        with patch("local_learning_runtime.relay.detect_user_presence",
+                   return_value={"screen_locked": True, "hid_idle_seconds": 3.0, "user_away": True}):
+            locked = send_interactive_relay(
+                self.store, "s1", "Done", "Locked away",
+                turn_source="local", elapsed_seconds=5.0,
+            )
+            self.assertEqual(locked["status"], "WAITING")
+            self.assertEqual(len(_MockFlowServer.posted_cards), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

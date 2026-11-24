@@ -71,6 +71,7 @@ let activeRunId = null;
 let pollTimer = null;
 let pollInFlight = false;
 let injectingFromTeams = false;
+let currentTurnSource = "local";
 
 function stopPolling() {
     if (pollTimer) {
@@ -137,6 +138,7 @@ const session = await joinSession({
                     summary: String(args.question || ""),
                     choices: Array.isArray(args.options) ? args.options : [],
                     update_message: "✅ 选择已发回当前 VS Code Session！",
+                    force: true,
                 });
                 const runId = sent.run_id;
                 const deadline = Date.now() + timeoutSec * 1000;
@@ -173,10 +175,15 @@ const session = await joinSession({
             if (currentSessionId) {
                 runLlr(["relay-register", "--session", currentSessionId]).catch(() => {});
             }
-            if (!injectingFromTeams && activeRunId) {
-                await cancelActiveRelay();
+            if (injectingFromTeams) {
+                currentTurnSource = "teams";
+                injectingFromTeams = false;
+            } else {
+                currentTurnSource = "local";
+                if (activeRunId) {
+                    await cancelActiveRelay();
+                }
             }
-            injectingFromTeams = false;
         },
         onAgentStop: async (input, invocation) => {
             const sid = invocation?.sessionId || input?.sessionId || currentSessionId || "vscode-session";
@@ -185,7 +192,6 @@ const session = await joinSession({
                 const cfg = await runLlr(["relay-register", "--session", sid]);
                 if (!cfg?.configured || !cfg?.enabled || !cfg?.auto_on_stop) return;
                 const elapsedSec = Math.max(0, (Date.now() - turnStartedAt) / 1000);
-                if (elapsedSec < (cfg.min_duration_seconds ?? 15)) return;
                 await cancelActiveRelay();
                 const cwdTail = String(input?.workingDirectory || "")
                     .split("/")
@@ -200,7 +206,11 @@ const session = await joinSession({
                     heading,
                     summary,
                     update_message: "✅ 指令已送达当前 VS Code Session，正在继续执行！",
+                    turn_source: currentTurnSource,
+                    elapsed_seconds: elapsedSec,
+                    force: false,
                 });
+                if (sent.status !== "WAITING" || !sent.run_id) return;
                 activeRunId = sent.run_id;
                 const startedPollAt = Date.now();
                 const maxWaitMs = (cfg.poll_timeout_seconds || 1800) * 1000;

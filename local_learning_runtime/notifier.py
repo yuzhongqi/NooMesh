@@ -2,6 +2,8 @@
 
 import json
 import os
+import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +25,55 @@ ALLOWED_WEBHOOK_SUFFIXES = (
     ".powerautomate.com",
     ".webhook.office.com",
 )
+
+
+def detect_user_presence(away_idle_seconds: int = 60) -> Dict[str, Any]:
+    """Check macOS screen-lock state and HID keyboard/mouse idle seconds via ioreg."""
+    ioreg = "/usr/sbin/ioreg"
+    if sys.platform != "darwin" or not os.path.isfile(ioreg):
+        return {
+            "supported": False,
+            "screen_locked": False,
+            "hid_idle_seconds": None,
+            "away_idle_seconds": away_idle_seconds,
+            "user_away": True,
+        }
+    screen_locked = False
+    hid_idle_seconds: Optional[float] = None
+    try:
+        root_raw = subprocess.run(
+            [ioreg, "-n", "Root", "-d1", "-a"],
+            capture_output=True, timeout=3, check=False,
+        ).stdout
+        if root_raw:
+            root_plist = plistlib.loads(root_raw)
+            users = root_plist.get("IOConsoleUsers") or []
+            screen_locked = bool(root_plist.get("IOConsoleLocked")) or any(
+                bool(u.get("CGSSessionScreenIsLocked")) or u.get("kCGSSessionOnConsoleKey") is False
+                for u in users if isinstance(u, dict)
+            )
+    except (OSError, subprocess.SubprocessError, plistlib.InvalidFileException, ValueError):
+        pass
+    try:
+        hid_out = subprocess.run(
+            [ioreg, "-c", "IOHIDSystem", "-d", "4"],
+            capture_output=True, text=True, timeout=3, check=False,
+        ).stdout
+        match = re.search(r'"HIDIdleTime"\s*=\s*(\d+)', hid_out)
+        if match:
+            hid_idle_seconds = int(match.group(1)) / 1_000_000_000.0
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    user_away = bool(screen_locked) or (
+        hid_idle_seconds is not None and hid_idle_seconds >= away_idle_seconds
+    )
+    return {
+        "supported": True,
+        "screen_locked": screen_locked,
+        "hid_idle_seconds": round(hid_idle_seconds, 1) if hid_idle_seconds is not None else None,
+        "away_idle_seconds": away_idle_seconds,
+        "user_away": user_away,
+    }
 
 
 def validate_webhook_url(url: str) -> Dict[str, str]:
@@ -62,7 +113,9 @@ def configure_notifier(store: Store, approve: bool,
                        webhook_url: Optional[str] = None,
                        min_duration_seconds: Optional[int] = None,
                        enabled: Optional[bool] = None,
-                       include_unregistered: Optional[bool] = None) -> Dict[str, Any]:
+                       include_unregistered: Optional[bool] = None,
+                       away_only: Optional[bool] = None,
+                       away_idle_seconds: Optional[int] = None) -> Dict[str, Any]:
     require(approve, "Explicit approval required to configure external webhook notifications")
     existing = load_notifier_config(store) or {}
     final_url = webhook_url.strip() if isinstance(webhook_url, str) and webhook_url.strip() else existing.get("webhook_url")
@@ -72,9 +125,14 @@ def configure_notifier(store: Store, approve: bool,
                 else existing.get("min_duration_seconds", 30))
     require(type(duration) is int and 0 <= duration <= 86400,
             "min_duration_seconds must be 0-86400")
+    idle_sec = (away_idle_seconds if away_idle_seconds is not None
+                else existing.get("away_idle_seconds", 60))
+    require(type(idle_sec) is int and 5 <= idle_sec <= 86400,
+            "away_idle_seconds must be 5-86400")
     is_enabled = enabled if enabled is not None else existing.get("enabled", True)
     unregistered = (include_unregistered if include_unregistered is not None
                     else existing.get("include_unregistered", True))
+    is_away_only = away_only if away_only is not None else existing.get("away_only", False)
     record = {
         "schema": "llr.notifier.v1",
         "kind": "teams_workflows",
@@ -84,6 +142,8 @@ def configure_notifier(store: Store, approve: bool,
         "masked_url": checked["masked_url"],
         "min_duration_seconds": duration,
         "include_unregistered": bool(unregistered),
+        "away_only": bool(is_away_only),
+        "away_idle_seconds": idle_sec,
         "updated_at": now(),
     }
     target = config_path(store)
@@ -116,6 +176,8 @@ def notifier_status(store: Store) -> Dict[str, Any]:
         "masked_url": cfg.get("masked_url"),
         "min_duration_seconds": cfg.get("min_duration_seconds", 30),
         "include_unregistered": bool(cfg.get("include_unregistered", True)),
+        "away_only": bool(cfg.get("away_only", False)),
+        "away_idle_seconds": int(cfg.get("away_idle_seconds", 60)),
         "updated_at": cfg.get("updated_at"),
         "last_delivery": last_delivery,
     }
@@ -282,6 +344,11 @@ def maybe_notify_turn_end(store: Store, client: str, session: str,
     cfg = load_notifier_config(store)
     if not cfg or not cfg.get("enabled", False):
         return {"status": "DISABLED"}
+    presence = None
+    if cfg.get("away_only", False):
+        presence = detect_user_presence(int(cfg.get("away_idle_seconds", 60)))
+        if not presence["user_away"]:
+            return {"status": "SKIPPED_USER_AT_COMPUTER", "presence": presence}
     if not workspace and not cfg.get("include_unregistered", True):
         return {"status": "SKIPPED_UNREGISTERED"}
     start_row = store.db.execute(
@@ -305,7 +372,8 @@ def maybe_notify_turn_end(store: Store, client: str, session: str,
              else start_meta.get("prompt_summary") or f"Session {session[:12]}")
     state = current_task["state"] if current_task else "COMPLETED"
     min_dur = int(cfg.get("min_duration_seconds", 30))
-    if duration < min_dur and state != "FAIL":
+    screen_locked = bool(presence and presence.get("screen_locked"))
+    if duration < min_dur and state != "FAIL" and not screen_locked:
         return {"status": "SKIPPED_SHORT_TURN", "duration_seconds": round(duration, 1)}
     dedup_key = "notified:" + (start_row["id"] if start_row else digest(
         canonical([session, now()[:16]]).encode()))

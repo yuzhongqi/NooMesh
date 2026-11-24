@@ -266,15 +266,17 @@ Microsoft Teams **Workflows** webhook notifies your personal chat (for example
   (`~/.copilot/extensions/teams-remote/extension.mjs`):
   ```sh
   pbpaste | llr relay-config --webhook-stdin --env-id "<ENV_ID>" --flow-id "<FLOW_ID>" \
-    --min-duration 15 --auto-on-stop --approve
+    --min-duration 15 --away-only --away-idle 60 --auto-on-stop --approve
   llr relay-status
   ```
-  When a turn finishes (`onAgentStop`), the extension sends a sanitized result
-  summary with radio actions and a multiline `Input.Text` box to your private Teams
-  chat, polls the outbound Power Automate run status (`x-ms-workflow-run-id`), and
-  injects your mobile reply straight back into the live session via `session.send()`
-  (or mid-turn via the `ask_teams_choice` tool without ending the turn). Typing at
-  your local keyboard automatically cancels any pending remote card run.
+  When `--away-only` is enabled, turns initiated on your computer stay completely
+  silent on Teams while you are at your Mac (`IOConsoleUsers` unlocked and
+  `HIDIdleTime < --away-idle`, default `60s`), and automatically switch to Teams
+  the moment your screen locks or your keyboard/mouse is idle past the threshold.
+  Once you reply from Teams (`turn_source: "teams"`), every follow-up turn replies
+  back to Teams until you send a message on your computer again (which cancels any
+  pending remote card and silences Teams). Mid-turn decisions remain available via
+  the `ask_teams_choice` tool.
 
 These checks are wired into claim recall/search, progressive context,
 solution route/execute, dependency checks and context refresh. A pinned old view

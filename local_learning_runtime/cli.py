@@ -88,6 +88,9 @@ def parser() -> argparse.ArgumentParser:
                             action="store_true", default=None)
     notify_cfg.add_argument("--registered-only", dest="include_unregistered",
                             action="store_false")
+    notify_cfg.add_argument("--away-only", dest="away_only", action="store_true", default=None)
+    notify_cfg.add_argument("--always-send", dest="away_only", action="store_false")
+    notify_cfg.add_argument("--away-idle", type=int)
     notify_cfg.add_argument("--approve", action="store_true")
     commands.add_parser("notify-status")
     notify_test = commands.add_parser("notify-test")
@@ -98,6 +101,9 @@ def parser() -> argparse.ArgumentParser:
     relay_cfg.add_argument("--flow-id")
     relay_cfg.add_argument("--min-duration", type=int)
     relay_cfg.add_argument("--poll-timeout", type=int)
+    relay_cfg.add_argument("--away-only", dest="away_only", action="store_true", default=None)
+    relay_cfg.add_argument("--always-send", dest="away_only", action="store_false")
+    relay_cfg.add_argument("--away-idle", type=int)
     relay_cfg.add_argument("--enable", dest="enabled", action="store_true", default=None)
     relay_cfg.add_argument("--disable", dest="enabled", action="store_false")
     relay_cfg.add_argument("--auto-on-stop", dest="auto_on_stop", action="store_true", default=None)
@@ -354,7 +360,8 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         if url is None:
             url = os.environ.get("LLR_TEAMS_WEBHOOK_URL")
         return configure_notifier(store, args.approve, url, args.min_duration,
-                                  args.enabled, args.include_unregistered)
+                                  args.enabled, args.include_unregistered,
+                                  args.away_only, args.away_idle)
     if args.command == "notify-status":
         return notifier_status(store)
     if args.command == "notify-test":
@@ -363,7 +370,7 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         url = getattr(args, "webhook_value", None) or os.environ.get("LLR_TEAMS_RELAY_URL")
         return configure_relay(store, args.approve, url, args.env_id, args.flow_id,
                                args.enabled, args.auto_on_stop, args.min_duration,
-                               args.poll_timeout)
+                               args.poll_timeout, args.away_only, args.away_idle)
     if args.command == "relay-status":
         return relay_status(store)
     if args.command == "relay-register":
@@ -382,7 +389,10 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         return send_interactive_relay(
             store, args.session, str(body.get("heading", "")),
             str(body.get("summary", "")), body.get("choices"),
-            str(body.get("update_message", "✅ 已发回电脑当前 Session！")))
+            str(body.get("update_message", "✅ 已发回电脑当前 Session！")),
+            turn_source=str(body.get("turn_source", "local")),
+            elapsed_seconds=body.get("elapsed_seconds"),
+            force=bool(body.get("force", False)))
     if args.command == "relay-poll":
         return poll_interactive_run(store, args.run_id)
     if args.command == "relay-cancel":

@@ -15,7 +15,7 @@ from .core import RuntimeErrorBase, Store, canonical, digest, now, require
 from .gateway_transport import NoRedirect
 from .learning import privacy_key
 from .lifecycle import parsed
-from .notifier import _acquire_flow_bearer_token, validate_webhook_url
+from .notifier import _acquire_flow_bearer_token, detect_user_presence, validate_webhook_url
 from .privacy import sanitize
 
 FLOW_API_HOST = "api.flow.microsoft.com"
@@ -66,7 +66,9 @@ def configure_relay(store: Store, approve: bool,
                     enabled: Optional[bool] = None,
                     auto_on_stop: Optional[bool] = None,
                     min_duration_seconds: Optional[int] = None,
-                    poll_timeout_seconds: Optional[int] = None) -> Dict[str, Any]:
+                    poll_timeout_seconds: Optional[int] = None,
+                    away_only: Optional[bool] = None,
+                    away_idle_seconds: Optional[int] = None) -> Dict[str, Any]:
     require(approve, "Explicit approval required to configure interactive Teams relay")
     existing = load_relay_config(store) or {}
     final_url = (webhook_url.strip() if isinstance(webhook_url, str) and webhook_url.strip()
@@ -85,11 +87,17 @@ def configure_relay(store: Store, approve: bool,
                     else existing.get("poll_timeout_seconds", 1800))
     require(type(poll_timeout) is int and 10 <= poll_timeout <= 86400,
             "poll_timeout_seconds must be 10-86400")
+    idle_sec = (away_idle_seconds if away_idle_seconds is not None
+                else existing.get("away_idle_seconds", 60))
+    require(type(idle_sec) is int and 5 <= idle_sec <= 86400,
+            "away_idle_seconds must be 5-86400")
     record = {
         "schema": "llr.relay.v1",
         "enabled": bool(enabled if enabled is not None else existing.get("enabled", True)),
         "auto_on_stop": bool(auto_on_stop if auto_on_stop is not None
                              else existing.get("auto_on_stop", True)),
+        "away_only": bool(away_only if away_only is not None else existing.get("away_only", False)),
+        "away_idle_seconds": idle_sec,
         "min_duration_seconds": min_dur,
         "poll_timeout_seconds": poll_timeout,
         "environment_id": env_id,
@@ -113,6 +121,8 @@ def relay_status(store: Store) -> Dict[str, Any]:
         "configured": True,
         "enabled": bool(cfg.get("enabled", True)),
         "auto_on_stop": bool(cfg.get("auto_on_stop", True)),
+        "away_only": bool(cfg.get("away_only", False)),
+        "away_idle_seconds": int(cfg.get("away_idle_seconds", 60)),
         "min_duration_seconds": int(cfg.get("min_duration_seconds", 15)),
         "poll_timeout_seconds": int(cfg.get("poll_timeout_seconds", 1800)),
         "environment_id": cfg.get("environment_id"),
@@ -184,9 +194,24 @@ def build_interactive_card(store: Store, session: str, heading: str,
 
 def send_interactive_relay(store: Store, session: str, heading: str,
                            summary: str, choices: Optional[List[Dict[str, str]]] = None,
-                           update_message: str = "✅ 已发回电脑当前 Session！") -> Dict[str, Any]:
+                           update_message: str = "✅ 已发回电脑当前 Session！",
+                           turn_source: str = "local",
+                           elapsed_seconds: Optional[float] = None,
+                           force: bool = False) -> Dict[str, Any]:
     cfg = load_relay_config(store)
     require(cfg is not None and cfg.get("enabled", True), "Interactive Teams relay is not enabled")
+    require(turn_source in ("local", "teams"), "turn_source must be local or teams")
+    if not force and turn_source == "local":
+        presence = None
+        if cfg.get("away_only", False):
+            presence = detect_user_presence(int(cfg.get("away_idle_seconds", 60)))
+            if not presence["user_away"]:
+                return {"status": "SKIPPED_USER_AT_COMPUTER", "presence": presence}
+        screen_locked = bool(presence and presence.get("screen_locked"))
+        if elapsed_seconds is not None and not screen_locked:
+            if float(elapsed_seconds) < int(cfg.get("min_duration_seconds", 15)):
+                return {"status": "SKIPPED_SHORT_TURN",
+                        "elapsed_seconds": round(float(elapsed_seconds), 1)}
     checked = validate_webhook_url(cfg["webhook_url"])
     built = build_interactive_card(store, session, heading, summary, choices)
     envelope = {
