@@ -283,6 +283,20 @@ Microsoft Teams **Workflows** webhook notifies your personal chat (for example
     idle, and keep replying to Teams once a turn originates from Teams until you
     type at that Mac again. Mid-turn mobile decisions are available in VS Code via
     `ask_teams_choice` and in both Codex and VS Code via MCP `local_learning_ask_choice`.
+  - **Proactive plain-text Workflows chat routing (`llr inbox-*`):** Even when no
+    session has sent a card first, pairing a `GetMessagesFromChat` reader workflow
+    lets you type plain messages directly in the Teams `Workflows` chat bottom box:
+    ```sh
+    pbpaste | llr inbox-config --reader-stdin --poll-seconds 6 \
+      --default-cwd "/path/to/repo" --allow-new-sessions --approve
+    llr inbox-status
+    ```
+    The Host polls only that private `Workflows` conversation, ignores bot messages,
+    and routes your text to the best-matching open session (by `#<sessionPrefix>`,
+    workspace/title relevance, or `@<MachineName>` across multiple Macs) via
+    `teams-remote` heartbeat pickup—or spawns a fresh bounded read-only CLI session
+    when you prefix `/new [@workspace] <prompt>` or when no live session is open,
+    and replies with `/sessions` when asked to list open sessions.
 
 These checks are wired into claim recall/search, progressive context,
 solution route/execute, dependency checks and context refresh. A pinned old view

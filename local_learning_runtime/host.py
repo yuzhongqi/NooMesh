@@ -109,6 +109,8 @@ def dispatch_request(home: Path, request: Dict[str, Any]) -> Any:
                 args.webhook_value = payload["webhook_stdin"]
             if args.command == "relay-config" and "webhook_stdin" in payload:
                 args.webhook_value = payload["webhook_stdin"]
+            if args.command == "inbox-config" and "reader_stdin" in payload:
+                args.reader_value = payload["reader_stdin"]
             if args.command == "relay-send" and "relay_input" in payload:
                 args.relay_payload = payload["relay_input"]
             if args.command == "notify":
@@ -131,6 +133,7 @@ class AgentServer(socketserver.ThreadingUnixStreamServer):
         self.home = home.expanduser().resolve()
         self.idle_seconds = idle_seconds
         self.last_used = time.monotonic()
+        self.last_inbox_poll = 0.0
         self.stopping = threading.Event()
         self.working = threading.Event()
         self.mission_lock = threading.Lock()
@@ -153,6 +156,17 @@ class AgentServer(socketserver.ThreadingUnixStreamServer):
             store = Store(self.home)
             row = None
             try:
+                from .inbox import load_inbox_config, poll_proactive_inbox
+                inbox_cfg = load_inbox_config(store)
+                inbox_enabled = bool(inbox_cfg and inbox_cfg.get("enabled", True))
+                if inbox_enabled:
+                    poll_every = max(3, int(inbox_cfg.get("poll_seconds", 8)))
+                    if time.monotonic() - self.last_inbox_poll >= poll_every:
+                        self.last_inbox_poll = time.monotonic()
+                        try:
+                            poll_proactive_inbox(store)
+                        except (RuntimeErrorBase, OSError, ValueError):
+                            pass
                 row = store.db.execute("SELECT id FROM missions WHERE state='RUNNING' "
                                        "ORDER BY updated_at LIMIT 1").fetchone()
                 if row is not None:
@@ -171,6 +185,9 @@ class AgentServer(socketserver.ThreadingUnixStreamServer):
                         from .dream import run_idle_dreams
                         run_idle_dreams(store)
                     self.working.clear()
+                    if inbox_enabled:
+                        self.last_used = time.monotonic()
+                        continue
                     with self.active_lock:
                         if self.active_requests > 0 or time.monotonic() - self.last_used <= self.idle_seconds:
                             continue

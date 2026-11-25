@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from .core import Store, canonical, digest, now, require
 from .discovery import discover, infer_platform
+from .inbox import inbox_status, register_live_session
 from .learning import (begin_task, ingest, load_policy, privacy_key, record_tool_trace,
                        search, status)
 from .notifier import maybe_notify_turn_end, notifier_status
@@ -51,11 +52,17 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any],
     cwd = payload.get("cwd")
     require(isinstance(session, str) and isinstance(cwd, str),
             "Client did not supply stable session ID/cwd; event not recorded")
+    prompt = payload.get("prompt") or payload.get("initialPrompt") or payload.get("initial_prompt")
+    prompt_text = prompt[:2000] if isinstance(prompt, str) else ""
+    if event in ("sessionStart", "userPromptSubmitted", "agentStop"):
+        register_live_session(
+            store, session, client=client, cwd=cwd,
+            title=prompt_text if event == "userPromptSubmitted" else "",
+            state="idle" if event == "agentStop" else "active",
+        )
     if event == "userPromptSubmitted" and client in ("codex", "codex-hooks"):
         set_codex_remote_turn(store, session, False)
         cancel_interactive_run(store, session=session)
-    prompt = payload.get("prompt") or payload.get("initialPrompt") or payload.get("initial_prompt")
-    prompt_text = prompt[:2000] if isinstance(prompt, str) else ""
     context = None
     inferred = infer_platform(prompt_text) if (
         prompt_text.strip() and event in ("sessionStart", "userPromptSubmitted")) else None
@@ -397,6 +404,7 @@ def doctor(store: Store) -> Dict[str, Any]:
             "dream_interval_seconds": policy.get("dream_interval_seconds", 43200),
             "teams_notifier": notifier_status(store),
             "teams_relay": relay_status(store),
+            "teams_inbox": inbox_status(store),
             "recent_handoffs": receipts,
             "client_trust": "Must be verified in the actual client UI; file presence is not invocation.",
             "local_only_default": True, "model_gateway_configured": (store.home / "model-gateway.json").exists(),

@@ -122,15 +122,24 @@ def respond(store: Store, message: Dict[str, Any]) -> Dict[str, Any]:
         elif params["name"] == "local_learning_dream":
             result = dream_pass(store, args["workspace"], apply=False, approve=False)
         elif params["name"] == "local_experience_context":
+            raw_level = args.get("level", 2)
+            if isinstance(raw_level, str) and raw_level.strip().isdigit():
+                raw_level = int(raw_level.strip())
+            raw_cursor = args.get("cursor", 0)
+            if isinstance(raw_cursor, str) and raw_cursor.strip().isdigit():
+                raw_cursor = int(raw_cursor.strip())
             result = packet(store, Path(args["cwd"]), args["query"], args["session"],
-                            args.get("level", 2), args.get("node"), args.get("revision"),
-                            args.get("cursor", 0))
+                            raw_level, args.get("node"), args.get("revision"),
+                            raw_cursor)
         elif params["name"] == "local_experience_route":
             result = route(store, Path(args["cwd"]), args["query"], args["session"],
                            args.get("parameters"), args.get("conditions"))
         elif params["name"] == "local_experience_execute":
+            import re
+            raw_inv = str(args["invocation"]).strip()
+            normalized_inv = re.sub(r"\s+", "-", raw_inv)
             result = execute_solution(store, args["workspace"], args["solution"], args["session"],
-                                      args["invocation"], args["parameters"], args["conditions"])
+                                      normalized_inv, args["parameters"], args["conditions"])
         elif params["name"] == "local_learning_status":
             result = status(store, args.get("task_run"))
         elif params["name"] == "local_learning_ask_choice":

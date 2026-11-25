@@ -1,10 +1,10 @@
-// User-scoped Copilot SDK extension template: ~/.copilot/extensions/teams-remote/extension.mjs
-// Bidirectional Microsoft Teams Workflows relay for continuing VS Code Copilot sessions and mobile choices
+// Extension: teams-remote
+// Bidirectional Microsoft Teams Workflows remote relay for continuing VS Code Copilot sessions and mobile choices
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { joinSession } from "@github/copilot-sdk/extension";
 
 const XCODE_PYTHON = "/Applications/Xcode_26.4.1.app/Contents/Developer/usr/bin/python3";
@@ -65,11 +65,15 @@ function runLlr(args, stdinObj = null, timeoutMs = 20000) {
 }
 
 let currentSessionId = null;
+let currentWorkingDirectory = process.cwd();
+let currentTitle = "";
+let currentState = "idle";
 let turnStartedAt = Date.now();
 let lastAssistantText = "";
 let activeRunId = null;
 let pollTimer = null;
 let pollInFlight = false;
+let heartbeatInFlight = false;
 let injectingFromTeams = false;
 let currentTurnSource = "local";
 
@@ -163,17 +167,43 @@ const session = await joinSession({
     hooks: {
         onSessionStart: async (input, invocation) => {
             currentSessionId = invocation?.sessionId || input?.sessionId || currentSessionId;
+            if (input?.workingDirectory) currentWorkingDirectory = input.workingDirectory;
             turnStartedAt = Date.now();
             if (currentSessionId) {
-                runLlr(["relay-register", "--session", currentSessionId]).catch(() => {});
+                runLlr([
+                    "inbox-heartbeat",
+                    "--session",
+                    currentSessionId,
+                    "--client",
+                    "copilot",
+                    "--cwd",
+                    currentWorkingDirectory,
+                    "--state",
+                    "idle",
+                ]).catch(() => {});
             }
         },
         onUserPromptSubmitted: async (input, invocation) => {
             currentSessionId = invocation?.sessionId || input?.sessionId || currentSessionId;
+            if (input?.workingDirectory) currentWorkingDirectory = input.workingDirectory;
+            if (input?.prompt) currentTitle = String(input.prompt).slice(0, 100);
+            currentState = "active";
             turnStartedAt = Date.now();
             lastAssistantText = "";
             if (currentSessionId) {
-                runLlr(["relay-register", "--session", currentSessionId]).catch(() => {});
+                runLlr([
+                    "inbox-heartbeat",
+                    "--session",
+                    currentSessionId,
+                    "--client",
+                    "copilot",
+                    "--cwd",
+                    currentWorkingDirectory,
+                    "--title",
+                    currentTitle,
+                    "--state",
+                    "active",
+                ]).catch(() => {});
             }
             if (injectingFromTeams) {
                 currentTurnSource = "teams";
@@ -188,6 +218,8 @@ const session = await joinSession({
         onAgentStop: async (input, invocation) => {
             const sid = invocation?.sessionId || input?.sessionId || currentSessionId || "vscode-session";
             currentSessionId = sid;
+            if (input?.workingDirectory) currentWorkingDirectory = input.workingDirectory;
+            currentState = "idle";
             try {
                 const cfg = await runLlr(["relay-register", "--session", sid]);
                 if (!cfg?.configured || !cfg?.enabled || !cfg?.auto_on_stop) return;
@@ -255,11 +287,64 @@ const session = await joinSession({
         },
         onSessionEnd: async () => {
             await cancelActiveRelay();
+            if (currentSessionId) {
+                await runLlr(["inbox-heartbeat", "--session", currentSessionId, "--unregister"]).catch(() => {});
+            }
         },
     },
 });
 
+if (!currentSessionId && session.workspacePath) {
+    currentSessionId = basename(session.workspacePath);
+}
+
+async function tickProactiveHeartbeat() {
+    if (heartbeatInFlight || !currentSessionId) return;
+    heartbeatInFlight = true;
+    try {
+        const claimed = await runLlr([
+            "inbox-heartbeat",
+            "--session",
+            currentSessionId,
+            "--client",
+            "copilot",
+            "--cwd",
+            currentWorkingDirectory,
+            "--title",
+            currentTitle,
+            "--state",
+            currentState,
+        ]);
+        if (claimed?.status === "CLAIMED" && claimed.prompt) {
+            await cancelActiveRelay();
+            injectingFromTeams = true;
+            currentTurnSource = "teams";
+            currentState = "active";
+            turnStartedAt = Date.now();
+            await session
+                .log("📱 Proactive Teams Workflows message received — executing in this session...", {
+                    ephemeral: true,
+                })
+                .catch(() => {});
+            setTimeout(() => {
+                session.send({ prompt: claimed.prompt }).catch((err) => {
+                    injectingFromTeams = false;
+                    console.error("teams-remote proactive session.send failed:", err?.message || err);
+                });
+            }, 50);
+        }
+    } catch {
+        // Ignore transient IPC hiccups; next heartbeat retries cleanly.
+    } finally {
+        heartbeatInFlight = false;
+    }
+}
+
+tickProactiveHeartbeat();
+setInterval(tickProactiveHeartbeat, 3500);
+
 session.on("assistant.turn_start", () => {
+    currentState = "active";
     turnStartedAt = Date.now();
 });
 
@@ -269,3 +354,4 @@ session.on("assistant.message", (event) => {
         lastAssistantText = content;
     }
 });
+

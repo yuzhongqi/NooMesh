@@ -305,6 +305,22 @@ class Store:
                 source TEXT NOT NULL, reason TEXT NOT NULL, occurred_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS memory_events_subject ON memory_events
                 (workspace,kind,subject,version,case_key,occurred_at);
+            CREATE TABLE IF NOT EXISTS live_sessions (
+                session TEXT PRIMARY KEY,
+                client TEXT NOT NULL,
+                cwd TEXT NOT NULL,
+                workspace TEXT,
+                title TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT 'idle',
+                heartbeat_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS proactive_inbox (
+                message_id TEXT PRIMARY KEY,
+                target_session TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                state TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL);
         """)
         trace_cols = {row["name"] for row in self.db.execute("PRAGMA table_info(tool_traces)")}
         if "detail" not in trace_cols:

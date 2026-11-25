@@ -25,6 +25,8 @@ from .learning import retry_milestone
 from .clients import (hook, install_copilot, install_codex, install_codex_hooks,
                       codex_notify, setup_client, doctor)
 from .mcp import serve
+from .inbox import (claim_proactive_message, configure_inbox, inbox_status,
+                    poll_proactive_inbox, register_live_session)
 from .memos import invalidate_memo, propose_memo
 from .notifier import configure_notifier, notifier_status, send_test_notification
 from .probes import android_node
@@ -126,6 +128,34 @@ def parser() -> argparse.ArgumentParser:
     relay_cancel_cmd = commands.add_parser("relay-cancel")
     relay_cancel_cmd.add_argument("--session")
     relay_cancel_cmd.add_argument("--run-id")
+    inbox_cfg = commands.add_parser("inbox-config")
+    inbox_cfg.add_argument("--reader-stdin", action="store_true")
+    inbox_cfg.add_argument("--poll-seconds", type=int)
+    inbox_cfg.add_argument("--default-cwd")
+    inbox_cfg.add_argument("--machine-name")
+    inbox_cfg.add_argument("--new-session-client", choices=["copilot", "codex"])
+    inbox_cfg.add_argument("--allow-new-sessions", dest="allow_new_sessions",
+                           action="store_true", default=None)
+    inbox_cfg.add_argument("--no-new-sessions", dest="allow_new_sessions",
+                           action="store_false")
+    inbox_cfg.add_argument("--require-machine-tag", dest="require_machine_tag",
+                           action="store_true", default=None)
+    inbox_cfg.add_argument("--no-require-machine-tag", dest="require_machine_tag",
+                           action="store_false")
+    inbox_cfg.add_argument("--enable", dest="enabled", action="store_true", default=None)
+    inbox_cfg.add_argument("--disable", dest="enabled", action="store_false")
+    inbox_cfg.add_argument("--approve", action="store_true")
+    commands.add_parser("inbox-status")
+    commands.add_parser("inbox-poll")
+    inbox_claim_cmd = commands.add_parser("inbox-claim")
+    inbox_claim_cmd.add_argument("--session", required=True)
+    inbox_hb = commands.add_parser("inbox-heartbeat")
+    inbox_hb.add_argument("--session", required=True)
+    inbox_hb.add_argument("--client", default="copilot")
+    inbox_hb.add_argument("--cwd", default="")
+    inbox_hb.add_argument("--title", default="")
+    inbox_hb.add_argument("--state", default="idle")
+    inbox_hb.add_argument("--unregister", action="store_true")
     preference = commands.add_parser("preference")
     preference.add_argument("id")
     preference.add_argument("--text", required=True)
@@ -407,6 +437,26 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         return poll_interactive_run(store, args.run_id)
     if args.command == "relay-cancel":
         return cancel_interactive_run(store, args.session, args.run_id)
+    if args.command == "inbox-config":
+        url = getattr(args, "reader_value", None) or os.environ.get("LLR_TEAMS_READER_URL")
+        return configure_inbox(
+            store, args.approve, url, args.enabled, args.poll_seconds,
+            args.allow_new_sessions, args.new_session_client, args.default_cwd,
+            args.machine_name, args.require_machine_tag,
+        )
+    if args.command == "inbox-status":
+        return inbox_status(store)
+    if args.command == "inbox-poll":
+        return poll_proactive_inbox(store)
+    if args.command == "inbox-claim":
+        return claim_proactive_message(store, args.session)
+    if args.command == "inbox-heartbeat":
+        if args.unregister:
+            with store.transaction():
+                store.db.execute("DELETE FROM live_sessions WHERE session=?", (args.session,))
+            return {"session": args.session, "unregistered": True}
+        register_live_session(store, args.session, args.client, args.cwd, args.title, args.state)
+        return claim_proactive_message(store, args.session)
     if args.command == "context":
         return packet(store, args.cwd, args.query, args.session, args.level,
                       args.node, args.revision, args.cursor, args.budget)
@@ -611,6 +661,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 raw_url = sys.stdin.buffer.read(8001)
                 require(len(raw_url) <= 8000, "Webhook URL input too large")
                 payload["webhook_stdin"] = raw_url.decode("utf-8").strip()
+            elif args.command == "inbox-config" and args.reader_stdin:
+                raw_url = sys.stdin.buffer.read(8001)
+                require(len(raw_url) <= 8000, "Reader URL input too large")
+                payload["reader_stdin"] = raw_url.decode("utf-8").strip()
             elif args.command == "relay-send":
                 raw_body = sys.stdin.buffer.read(64_001)
                 require(len(raw_body) <= 64_000, "Relay input too large")
