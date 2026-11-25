@@ -41,6 +41,8 @@ class ProactiveInboxTests(unittest.TestCase):
         self.assertEqual(d["machine_tag"], "MBP-3")
         self.assertEqual(d["session_prefix"], "abcd1234")
         self.assertEqual(d["prompt"], "check git status")
+        self.assertTrue(parse_proactive_directive("/session")["list_only"])
+        self.assertTrue(parse_proactive_directive("/sessions")["list_only"])
         self.assertTrue(parse_proactive_directive("/new @ocm inspect WidgetService")["force_new"])
 
         register_live_session(self.store, "sess-om-1111", "copilot", str(self.repo_a), "Theme setup")

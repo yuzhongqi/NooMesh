@@ -155,6 +155,7 @@ def parser() -> argparse.ArgumentParser:
     inbox_hb.add_argument("--cwd", default="")
     inbox_hb.add_argument("--title", default="")
     inbox_hb.add_argument("--state", default="idle")
+    inbox_hb.add_argument("--heartbeat-only", action="store_true")
     inbox_hb.add_argument("--unregister", action="store_true")
     preference = commands.add_parser("preference")
     preference.add_argument("id")
@@ -456,6 +457,8 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
                 store.db.execute("DELETE FROM live_sessions WHERE session=?", (args.session,))
             return {"session": args.session, "unregistered": True}
         register_live_session(store, args.session, args.client, args.cwd, args.title, args.state)
+        if args.heartbeat_only:
+            return {"status": "HEARTBEAT_OK"}
         return claim_proactive_message(store, args.session)
     if args.command == "context":
         return packet(store, args.cwd, args.query, args.session, args.level,

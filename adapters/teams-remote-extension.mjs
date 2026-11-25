@@ -186,7 +186,10 @@ const session = await joinSession({
         onUserPromptSubmitted: async (input, invocation) => {
             currentSessionId = invocation?.sessionId || input?.sessionId || currentSessionId;
             if (input?.workingDirectory) currentWorkingDirectory = input.workingDirectory;
-            if (input?.prompt) currentTitle = String(input.prompt).slice(0, 100);
+            const incomingPrompt = String(input?.prompt || "");
+            if (incomingPrompt && !incomingPrompt.trimStart().startsWith("<system_notification>")) {
+                currentTitle = incomingPrompt.slice(0, 100);
+            }
             currentState = "active";
             turnStartedAt = Date.now();
             lastAssistantText = "";
@@ -302,7 +305,7 @@ async function tickProactiveHeartbeat() {
     if (heartbeatInFlight || !currentSessionId) return;
     heartbeatInFlight = true;
     try {
-        const claimed = await runLlr([
+        const args = [
             "inbox-heartbeat",
             "--session",
             currentSessionId,
@@ -314,8 +317,14 @@ async function tickProactiveHeartbeat() {
             currentTitle,
             "--state",
             currentState,
-        ]);
-        if (claimed?.status === "CLAIMED" && claimed.prompt) {
+        ];
+        // Only claim queued proactive messages when the session is idle so it executes immediately
+        // instead of queuing silently behind an active turn!
+        const res =
+            currentState === "idle"
+                ? await runLlr(args)
+                : await runLlr([...args, "--heartbeat-only"]).catch(() => ({}));
+        if (res?.status === "CLAIMED" && res.prompt) {
             await cancelActiveRelay();
             injectingFromTeams = true;
             currentTurnSource = "teams";
@@ -327,7 +336,7 @@ async function tickProactiveHeartbeat() {
                 })
                 .catch(() => {});
             setTimeout(() => {
-                session.send({ prompt: claimed.prompt }).catch((err) => {
+                session.send({ prompt: res.prompt }).catch((err) => {
                     injectingFromTeams = false;
                     console.error("teams-remote proactive session.send failed:", err?.message || err);
                 });

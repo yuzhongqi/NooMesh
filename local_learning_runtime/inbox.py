@@ -98,7 +98,9 @@ def register_live_session(store: Store, session: str, client: str = "copilot",
     if safe_cwd and Path(safe_cwd).is_dir():
         found = discover(store, Path(safe_cwd), session[:64])
         ws = found.get("workspace")
-    safe_title = sanitize(str(title)[:120], key)[0] if title else ""
+    safe_title = sanitize(str(title)[:120], key)[0] if (
+        title and not str(title).lstrip().startswith("<system_notification>")
+    ) else ""
     ts = now()
     with store.transaction():
         old = store.db.execute("SELECT cwd,workspace,title,updated_at FROM live_sessions WHERE session=?",
@@ -188,7 +190,7 @@ def parse_proactive_directive(raw_text: str) -> Dict[str, Any]:
             continue
         break
 
-    if re.fullmatch(r"/(sessions|status|list)", text, re.I):
+    if re.fullmatch(r"/(sessions?|status|list)", text, re.I):
         list_only = True
     else:
         m_new = re.match(r"^/new(?:\s+@?([A-Za-z0-9_./-]+))?\s+(.+)$", text, re.S | re.I)
@@ -229,13 +231,20 @@ def select_best_live_session(store: Store, prompt: str,
         return live[0]
     terms = tokenize(prompt[:1000])
     prompt_lower = prompt.lower()
-    best_score = -1
+    best_score = -10_000
     best_item = live[0]
     for idx, item in enumerate(live):
         score = 0
         ws = (item.get("workspace") or "").lower()
         cwd = (item.get("cwd") or "").lower()
-        title = item.get("title") or ""
+        # Gather rich topic context from both current title and recent task_runs titles of this session!
+        recent_titles = [
+            r[0] for r in store.db.execute(
+                "SELECT title FROM task_runs WHERE session=? ORDER BY updated_at DESC LIMIT 5",
+                (item["session"],),
+            ).fetchall() if r[0] and not str(r[0]).lstrip().startswith("<system_notification>")
+        ]
+        combined_topic = " ".join([item.get("title") or "", *recent_titles])
         if ws:
             for part in re.split(r"[^a-z0-9]+", ws):
                 if len(part) >= 3 and part in prompt_lower:
@@ -244,10 +253,11 @@ def select_best_live_session(store: Store, prompt: str,
             tail = Path(cwd).name.lower()
             if len(tail) >= 3 and tail in prompt_lower:
                 score += 3
-        if terms and title:
-            score += 2 * len(terms & tokenize(title))
-        # Tie-break toward most recently active session (idx == 0).
-        rank = score * 100 - idx
+        if terms and combined_topic:
+            score += 3 * len(terms & tokenize(combined_topic))
+        # Prefer idle sessions (+150) over sessions currently busy in a long turn!
+        idle_bonus = 150 if item.get("state") == "idle" else 0
+        rank = score * 100 + idle_bonus - idx
         if rank > best_score:
             best_score = rank
             best_item = item
@@ -426,6 +436,19 @@ def poll_proactive_inbox(store: Store, messages_override: Optional[List[Dict[str
                     "INSERT OR IGNORE INTO proactive_inbox VALUES (?,?,?,?,?,?)",
                     (mid, chosen["session"], safe_prompt, "QUEUED", now(), now()),
                 )
+            busy_note = "（该 Session 当前正忙，将在本轮结束后紧接着执行）" if chosen.get("state") == "active" else "（该 Session 当前空闲，正在立即执行）"
+            notif_cfg = load_notifier_config(store)
+            if notif_cfg and notif_cfg.get("enabled", True):
+                try:
+                    ack = build_teams_payload(
+                        store, chosen.get("client", "copilot"),
+                        chosen.get("workspace"), 0.0, "ROUTED",
+                        safe_prompt[:90], "proactive_ack",
+                    )
+                    ack["text"] = f"📨 [{machine_label}] 已路由至 Session `#{chosen['session'][:8]}` {busy_note}：{safe_prompt[:80]}"
+                    _deliver_sync(store, ack, timeout=6.0)
+                except (RuntimeErrorBase, OSError, ValueError):
+                    pass
             processed.append({
                 "message_id": mid,
                 "action": "QUEUED_TO_LIVE_SESSION",
