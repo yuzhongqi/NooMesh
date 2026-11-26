@@ -242,25 +242,90 @@ final class DashboardViewModel: ObservableObject {
     }
 }
 
-// MARK: - SwiftUI Popover Views
+// MARK: - Apple HIG Design Tokens & Surfaces
 
-struct StatusPill: View {
-    let dotColor: Color
+enum HIGPalette {
+    static let primaryLabel = Color(nsColor: .labelColor)
+    static let secondaryLabel = Color(nsColor: .secondaryLabelColor)
+    static let tertiaryLabel = Color(nsColor: .tertiaryLabelColor)
+    static let onlineDot = Color(nsColor: .systemGreen)
+    static let standbyDot = Color(nsColor: .tertiaryLabelColor)
+
+    static func platterFill(_ scheme: ColorScheme, emphasized: Bool = false) -> Color {
+        if scheme == .dark {
+            return Color.white.opacity(emphasized ? 0.11 : 0.075)
+        } else {
+            return Color.white.opacity(emphasized ? 0.86 : 0.68)
+        }
+    }
+
+    static func platterStroke(_ scheme: ColorScheme, active: Bool = false) -> Color {
+        if active {
+            return scheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.14)
+        }
+        return scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.06)
+    }
+
+    static func recessedFill(_ scheme: ColorScheme) -> Color {
+        return scheme == .dark ? Color.black.opacity(0.24) : Color.black.opacity(0.055)
+    }
+
+    static func chipFill(_ scheme: ColorScheme) -> Color {
+        return scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.055)
+    }
+}
+
+struct ApplePlatterModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var cornerRadius: CGFloat = 11
+    var emphasized: Bool = false
+    var activeBorder: Bool = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(HIGPalette.platterFill(colorScheme, emphasized: emphasized))
+                    .shadow(
+                        color: colorScheme == .dark ? .clear : Color.black.opacity(0.035),
+                        radius: 2, x: 0, y: 1
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(HIGPalette.platterStroke(colorScheme, active: activeBorder), lineWidth: 0.5)
+            )
+    }
+}
+
+extension View {
+    func applePlatter(cornerRadius: CGFloat = 11, emphasized: Bool = false, activeBorder: Bool = false) -> some View {
+        modifier(ApplePlatterModifier(cornerRadius: cornerRadius, emphasized: emphasized, activeBorder: activeBorder))
+    }
+}
+
+// MARK: - Native Control-Center Style Views
+
+struct ServiceStatusItem: View {
+    let symbol: String?
+    let dotColor: Color?
     let label: String
 
     var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(dotColor)
-                .frame(width: 6, height: 6)
+        HStack(spacing: 4.5) {
+            if let dot = dotColor {
+                Circle()
+                    .fill(dot)
+                    .frame(width: 6, height: 6)
+            } else if let sym = symbol {
+                Image(systemName: sym)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundColor(HIGPalette.secondaryLabel)
+            }
             Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.secondary)
+                .font(.system(size: 10.5, weight: .regular))
+                .foregroundColor(HIGPalette.secondaryLabel)
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(Color.primary.opacity(0.06))
-        .clipShape(Capsule())
     }
 }
 
@@ -268,149 +333,197 @@ struct MetricCard: View {
     let title: String
     let value: String
     let subtitle: String
-    let accent: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.secondary)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundColor(HIGPalette.secondaryLabel)
+                .lineLimit(1)
             Text(value)
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundColor(accent)
+                .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundColor(HIGPalette.primaryLabel)
             Text(subtitle)
-                .font(.system(size: 9))
-                .foregroundColor(.secondary.opacity(0.85))
+                .font(.system(size: 9.5))
+                .foregroundColor(HIGPalette.tertiaryLabel)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
-        .background(Color.primary.opacity(0.045))
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .applePlatter(cornerRadius: 10)
+    }
+}
+
+struct ControlCenterSegmentedBar: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Binding var selection: Int
+    let leftTitle: String
+    let rightTitle: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            segmentButton(index: 0, title: leftTitle)
+            segmentButton(index: 1, title: rightTitle)
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 8.5, style: .continuous)
+                .fill(HIGPalette.recessedFill(colorScheme))
+        )
+    }
+
+    private func segmentButton(index: Int, title: String) -> some View {
+        let isSelected = selection == index
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.14)) {
+                selection = index
+            }
+        }) {
+            Text(title)
+                .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
+                .foregroundColor(isSelected ? HIGPalette.primaryLabel : HIGPalette.secondaryLabel)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4.5)
+                .background(
+                    Group {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 6.5, style: .continuous)
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.15) : Color.white.opacity(0.95))
+                                .shadow(
+                                    color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.07),
+                                    radius: 1.5, x: 0, y: 0.5
+                                )
+                        }
+                    }
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
 struct KnowledgeKindTag: View {
+    @Environment(\.colorScheme) private var colorScheme
     let kind: String
 
-    private var meta: (String, Color) {
+    private var meta: (String, String) {
         switch kind {
         case "memo":
-            return ("Memo", Color.orange)
+            return ("shield.lefthalf.filled", "Memo")
         case "solution":
-            return ("契约", Color.purple)
+            return ("bolt.horizontal.fill", "契约")
         default:
-            return ("Claim", Color.blue)
+            return ("checkmark.seal", "Claim")
         }
     }
 
     var body: some View {
-        Text(meta.0)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundColor(meta.1)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1.5)
-            .background(meta.1.opacity(0.14))
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        HStack(spacing: 3) {
+            Image(systemName: meta.0)
+                .font(.system(size: 8.5, weight: .medium))
+            Text(meta.1)
+                .font(.system(size: 9.5, weight: .medium))
+        }
+        .foregroundColor(HIGPalette.secondaryLabel)
+        .padding(.horizontal, 5.5)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                .fill(HIGPalette.chipFill(colorScheme))
+        )
     }
 }
 
 struct SessionCardView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let item: LiveSessionItem
 
     var isRunning: Bool { item.state == "active" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                HStack(spacing: 4) {
+                HStack(spacing: 4.5) {
                     Circle()
-                        .fill(isRunning ? Color.green : Color.gray.opacity(0.55))
-                        .frame(width: 7, height: 7)
+                        .fill(isRunning ? HIGPalette.onlineDot : HIGPalette.standbyDot)
+                        .frame(width: 6, height: 6)
                     Text(isRunning ? "执行中" : "待命")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(isRunning ? .green : .secondary)
+                        .font(.system(size: 10.5, weight: isRunning ? .semibold : .medium))
+                        .foregroundColor(isRunning ? HIGPalette.primaryLabel : HIGPalette.secondaryLabel)
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background((isRunning ? Color.green : Color.primary).opacity(0.10))
-                .clipShape(Capsule())
+
+                Text("·")
+                    .foregroundColor(HIGPalette.tertiaryLabel)
 
                 Text("\(item.client) \(item.session_short)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 10.5, weight: .regular, design: .monospaced))
+                    .foregroundColor(HIGPalette.secondaryLabel)
 
                 Text(item.workspace)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary.opacity(0.85))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(HIGPalette.tertiaryLabel)
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(item.updated_ago)
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary.opacity(0.75))
+                    .foregroundColor(HIGPalette.tertiaryLabel)
             }
 
             Text(item.title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(HIGPalette.primaryLabel)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
             if !item.last_query.isEmpty {
-                HStack(spacing: 4) {
+                HStack(spacing: 4.5) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 9.5))
+                        .foregroundColor(HIGPalette.tertiaryLabel)
                     Text(item.last_query)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 10.5))
+                        .foregroundColor(HIGPalette.secondaryLabel)
                         .lineLimit(1)
                 }
             }
 
             if !item.knowledge_used.isEmpty {
-                Divider().opacity(0.45)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
+                Divider()
+                    .opacity(colorScheme == .dark ? 0.35 : 0.5)
+                VStack(alignment: .leading, spacing: 4.5) {
+                    HStack(spacing: 4.5) {
                         Image(systemName: "sparkles")
-                            .font(.system(size: 9))
-                            .foregroundColor(.teal)
-                        Text("本任务已调用本地知识 (\(item.knowledge_used.count))")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.teal)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundColor(HIGPalette.secondaryLabel)
+                        Text("已调用本地知识 (\(item.knowledge_used.count))")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundColor(HIGPalette.secondaryLabel)
                     }
                     ForEach(item.knowledge_used) { k in
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             KnowledgeKindTag(kind: k.kind)
                             Text(k.title)
-                                .font(.system(size: 10.5))
-                                .foregroundColor(.primary.opacity(0.9))
+                                .font(.system(size: 11))
+                                .foregroundColor(HIGPalette.primaryLabel)
                                 .lineLimit(1)
                             Spacer(minLength: 4)
                             Text(k.time_ago)
-                                .font(.system(size: 9.5))
-                                .foregroundColor(.secondary.opacity(0.75))
+                                .font(.system(size: 10))
+                                .foregroundColor(HIGPalette.tertiaryLabel)
                         }
                     }
                 }
             } else {
                 Text("本会话暂未触发本地知识检索")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary.opacity(0.65))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(HIGPalette.tertiaryLabel)
             }
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(isRunning ? 0.065 : 0.038))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(isRunning ? Color.green.opacity(0.38) : Color.primary.opacity(0.06), lineWidth: 1)
-        )
+        .padding(11)
+        .applePlatter(cornerRadius: 11, emphasized: isRunning, activeBorder: isRunning)
     }
 }
 
@@ -420,78 +533,100 @@ struct ActivityRowView: View {
     var isLearned: Bool { item.event_type == "learned" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 5.5) {
             HStack(spacing: 6) {
-                HStack(spacing: 3) {
-                    Image(systemName: isLearned ? "checkmark.seal.fill" : "bolt.fill")
-                        .font(.system(size: 9))
+                HStack(spacing: 3.5) {
+                    Image(systemName: isLearned ? "checkmark.circle.fill" : "arrow.turn.down.right")
+                        .font(.system(size: 9.5, weight: .medium))
                     Text(item.action)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 10.5, weight: .medium))
                 }
-                .foregroundColor(isLearned ? .green : .teal)
+                .foregroundColor(HIGPalette.secondaryLabel)
 
                 KnowledgeKindTag(kind: item.kind)
 
                 Text(item.workspace)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(HIGPalette.tertiaryLabel)
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(item.time_ago)
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary.opacity(0.8))
+                    .foregroundColor(HIGPalette.tertiaryLabel)
             }
 
             Text(item.title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(HIGPalette.primaryLabel)
                 .lineLimit(2)
 
             if !item.task_title.isEmpty {
                 HStack(spacing: 4) {
                     Text(item.session_short)
-                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .foregroundColor(HIGPalette.tertiaryLabel)
                     Text("·")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(HIGPalette.tertiaryLabel)
                     Text(item.task_title)
                         .font(.system(size: 10.5))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(HIGPalette.secondaryLabel)
                         .lineLimit(1)
                 }
             }
         }
-        .padding(9)
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.primary.opacity(0.04))
-        )
+        .padding(10.5)
+        .applePlatter(cornerRadius: 10)
+    }
+}
+
+struct FooterActionPill: View {
+    let title: String
+    let systemImage: String
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4.5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10.5, weight: .medium))
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(HIGPalette.primaryLabel)
+            .padding(.horizontal, 9.5)
+            .padding(.vertical, 5)
+            .applePlatter(cornerRadius: 7.5)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.5 : 1.0)
     }
 }
 
 struct DashboardPopoverView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var vm: DashboardViewModel
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 11) {
             headerSection
             if let snap = vm.snapshot {
                 metricsSection(snap)
-                Picker("", selection: $vm.selectedTab) {
-                    Text("当前会话任务 (\(snap.live_sessions.count))").tag(0)
-                    Text("知识调用与学习 (\(snap.recent_activity.count))").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                ControlCenterSegmentedBar(
+                    selection: $vm.selectedTab,
+                    leftTitle: "当前会话任务 (\(snap.live_sessions.count))",
+                    rightTitle: "知识调用与学习 (\(snap.recent_activity.count))"
+                )
 
-                ScrollView {
-                    LazyVStack(spacing: 8) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 8) {
                         if vm.selectedTab == 0 {
                             if snap.live_sessions.isEmpty {
                                 emptyState(
-                                    icon: "rectangle.stack.badge.person.crop",
+                                    icon: "rectangle.stack",
                                     title: "当前没有活跃 IDE 会话心跳",
                                     subtitle: "打开 VS Code 或 Codex 对话后，这里会实时展示正在执行的任务与命中的本地知识。"
                                 )
@@ -514,56 +649,53 @@ struct DashboardPopoverView: View {
                             }
                         }
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 1)
                 }
             } else {
                 Spacer()
-                ProgressView("正在读取本地知识库...")
+                ProgressView("正在读取本地知识库…")
                     .font(.system(size: 12))
                 Spacer()
             }
 
             footerSection
         }
-        .padding(13)
+        .padding(14)
         .frame(width: 410, height: 545)
     }
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.teal, Color.blue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 30, height: 30)
+                    Circle()
+                        .fill(HIGPalette.chipFill(colorScheme))
+                        .frame(width: 32, height: 32)
                     Image(systemName: "brain.head.profile")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.white)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(HIGPalette.primaryLabel)
                 }
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text("Clone Yourself")
-                            .font(.system(size: 13.5, weight: .bold))
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundColor(HIGPalette.primaryLabel)
                         if let ws = vm.snapshot?.primary_workspace {
                             Text(ws)
                                 .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.teal)
-                                .padding(.horizontal, 6)
+                                .foregroundColor(HIGPalette.secondaryLabel)
+                                .padding(.horizontal, 6.5)
                                 .padding(.vertical, 1.5)
-                                .background(Color.teal.opacity(0.12))
-                                .clipShape(Capsule())
+                                .background(
+                                    Capsule()
+                                        .fill(HIGPalette.chipFill(colorScheme))
+                                )
                         }
                     }
-                    Text(vm.snapshot.map { "最近命中: \($0.last_hit_ago) · \($0.machine_name)" } ?? "本地经验运行时")
+                    Text(vm.snapshot.map { "最近命中 \($0.last_hit_ago) · \($0.machine_name)" } ?? "本地经验运行时")
                         .font(.system(size: 10.5))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(HIGPalette.secondaryLabel)
                         .lineLimit(1)
                 }
 
@@ -571,48 +703,54 @@ struct DashboardPopoverView: View {
             }
 
             if let host = vm.snapshot?.host {
-                HStack(spacing: 6) {
-                    StatusPill(
-                        dotColor: host.online ? .green : .orange,
-                        label: host.online ? "Host 守护在线" : "Host 空闲休眠"
+                HStack(spacing: 12) {
+                    ServiceStatusItem(
+                        symbol: nil,
+                        dotColor: host.online ? HIGPalette.onlineDot : HIGPalette.standbyDot,
+                        label: host.online ? "Host 在线" : "Host 按需休眠"
                     )
                     if host.teams_away_only || host.teams_inbox {
-                        StatusPill(dotColor: .blue, label: "Teams 远程联动")
+                        ServiceStatusItem(
+                            symbol: "iphone",
+                            dotColor: nil,
+                            label: "Teams 远程接力"
+                        )
                     }
                     if host.auto_dream {
-                        StatusPill(dotColor: .purple, label: "空闲自动整理")
+                        ServiceStatusItem(
+                            symbol: "moon",
+                            dotColor: nil,
+                            label: "空闲自动整理"
+                        )
                     }
                     Spacer()
                 }
+                .padding(.leading, 2)
             }
         }
     }
 
     private func metricsSection(_ snap: MenuBarSnapshot) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             MetricCard(
                 title: "24h 知识命中",
                 value: "\(snap.totals.today_hits)",
-                subtitle: "累计复用 \(snap.totals.total_hits) 次",
-                accent: .teal
+                subtitle: "累计 \(snap.totals.total_hits) 次"
             )
             MetricCard(
                 title: "避坑 Memo",
                 value: "\(snap.totals.memos)",
-                subtitle: "强约束红线",
-                accent: .orange
+                subtitle: "强约束规则"
             )
             MetricCard(
                 title: "实证 Claim",
                 value: "\(snap.totals.claims)",
-                subtitle: "带锚点证据",
-                accent: .blue
+                subtitle: "带锚点证据"
             )
             MetricCard(
                 title: "零模型契约",
                 value: "\(snap.totals.solutions)",
-                subtitle: "P/R/Q 直出",
-                accent: .purple
+                subtitle: "P/R/Q 直出"
             )
         }
     }
@@ -620,61 +758,64 @@ struct DashboardPopoverView: View {
     private func emptyState(icon: String, title: String, subtitle: String) -> some View {
         VStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 26))
-                .foregroundColor(.secondary.opacity(0.6))
+                .font(.system(size: 24, weight: .light))
+                .foregroundColor(HIGPalette.tertiaryLabel)
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(HIGPalette.primaryLabel)
             Text(subtitle)
                 .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundColor(HIGPalette.secondaryLabel)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 24)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
     }
 
     private var footerSection: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 7) {
             if !vm.toastMessage.isEmpty {
                 Text(vm.toastMessage)
                     .font(.system(size: 10.5, weight: .medium))
-                    .foregroundColor(.teal)
+                    .foregroundColor(HIGPalette.secondaryLabel)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider().opacity(0.5)
-            HStack(spacing: 8) {
-                Button(action: { vm.openPortal() }) {
-                    Label("知识门户", systemImage: "safari")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(vm.isBusyAction)
-
-                Button(action: { vm.runDreamPass() }) {
-                    Label("立即巡检整理", systemImage: "moon.stars")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(vm.isBusyAction)
+            Divider()
+                .opacity(colorScheme == .dark ? 0.35 : 0.5)
+            HStack(spacing: 7) {
+                FooterActionPill(
+                    title: "知识门户",
+                    systemImage: "safari",
+                    disabled: vm.isBusyAction,
+                    action: { vm.openPortal() }
+                )
+                FooterActionPill(
+                    title: "巡检整理",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    disabled: vm.isBusyAction,
+                    action: { vm.runDreamPass() }
+                )
 
                 Spacer()
 
                 Button(action: { vm.refreshNow() }) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(HIGPalette.secondaryLabel)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
-                .help("立即刷新状态")
+                .buttonStyle(.plain)
+                .help("刷新状态")
 
                 Button(action: { NSApplication.shared.terminate(nil) }) {
-                    Text("退出图标")
-                        .font(.system(size: 10.5))
-                        .foregroundColor(.secondary)
+                    Text("退出")
+                        .font(.system(size: 11))
+                        .foregroundColor(HIGPalette.secondaryLabel)
+                        .padding(.horizontal, 4)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
             }
         }
     }
@@ -725,9 +866,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let hits = snap.totals.today_hits
         let active = snap.totals.active_sessions
         if active > 0 {
-            button.title = hits > 0 ? " ⚡\(hits)" : " ⚡"
-        } else if snap.just_hit_knowledge {
-            button.title = " ✨\(hits)"
+            button.title = hits > 0 ? " \(hits)·" : " ·"
         } else if hits > 0 {
             button.title = " \(hits)"
         } else {
