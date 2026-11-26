@@ -277,10 +277,16 @@ def serve_host(home: Path) -> None:
         path = endpoint(home)
         if path.exists():
             path.unlink()
+        pid_file = home / "host.pid"
+        pid_file.write_text(str(os.getpid()), encoding="utf-8")
+        from .menubar import ensure_menubar_if_enabled
+        ensure_menubar_if_enabled(home)
         server = AgentServer(home)
         try:
             server.serve_forever(poll_interval=0.1)
         finally:
+            if pid_file.exists():
+                pid_file.unlink()
             server.server_close()
 
 

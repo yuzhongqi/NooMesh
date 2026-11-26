@@ -27,6 +27,8 @@ from .clients import (hook, install_copilot, install_codex, install_codex_hooks,
 from .mcp import serve
 from .inbox import (claim_proactive_message, configure_inbox, inbox_status,
                     poll_proactive_inbox, register_live_session)
+from .menubar import (menubar_snapshot, open_live_portal, probe_menubar_running,
+                      start_menubar, stop_menubar)
 from .memos import invalidate_memo, propose_memo
 from .notifier import configure_notifier, notifier_status, send_test_notification
 from .probes import android_node
@@ -338,6 +340,17 @@ def parser() -> argparse.ArgumentParser:
     portal = commands.add_parser("export-portal")
     portal.add_argument("--workspace", required=True)
     portal.add_argument("--output", type=Path, required=True)
+    commands.add_parser("menubar-snapshot")
+    commands.add_parser("menubar-status")
+    mb_start = commands.add_parser("menubar-start")
+    mb_start.add_argument("--install-login-agent", action="store_true")
+    mb_start.add_argument("--approve", action="store_true")
+    mb_stop = commands.add_parser("menubar-stop")
+    mb_stop.add_argument("--keep-autostart", action="store_true")
+    mb_stop.add_argument("--uninstall-login-agent", action="store_true")
+    mb_portal = commands.add_parser("menubar-open-portal")
+    mb_portal.add_argument("--workspace")
+    mb_portal.add_argument("--no-open", action="store_true")
     acceptance = commands.add_parser("acceptance-android")
     acceptance.add_argument("--workspace", required=True)
     acceptance.add_argument("--device", required=True)
@@ -572,6 +585,17 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         return catalog(store, args.workspace)
     if args.command == "export-portal":
         return export_portal(store, args.workspace, args.output)
+    if args.command == "menubar-snapshot":
+        return menubar_snapshot(store)
+    if args.command == "menubar-status":
+        return probe_menubar_running(store.home)
+    if args.command == "menubar-start":
+        return start_menubar(store.home, args.approve, install_login=args.install_login_agent)
+    if args.command == "menubar-stop":
+        return stop_menubar(store.home, disable_autostart=not args.keep_autostart,
+                            uninstall_login=args.uninstall_login_agent)
+    if args.command == "menubar-open-portal":
+        return open_live_portal(store, workspace=args.workspace, open_browser=not args.no_open)
     if args.command == "acceptance-android":
         return android_acceptance(store, args.workspace, args.device, args.app, args.resource_id,
                                   read_json(args.context), args.output, args.approve)
@@ -654,6 +678,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             from .mcp import serve_bridge
             serve_bridge(args.home)
             return 0
+        elif args.command in ("menubar-snapshot", "menubar-status", "menubar-start",
+                              "menubar-stop", "menubar-open-portal"):
+            store = Store(args.home)
+            try:
+                output = dispatch(store, args)
+            finally:
+                store.close()
         else:
             payload = {"argv": ["--home", str(args.home)] + arguments}
             if args.command == "hook":

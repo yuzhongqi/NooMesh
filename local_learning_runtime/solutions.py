@@ -351,7 +351,9 @@ def route(store: Store, cwd: Path, query: str, session: str,
           actual: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     from .discovery import infer_platform
     require(isinstance(query, str) and 0 < len(query.encode()) <= 4000, "Invalid task query")
-    scope = discover(store, cwd, session, infer_platform(query))
+    explicit_plat = (actual.get("platform") if isinstance(actual, dict)
+                     and actual.get("platform") in ("android", "ios", "generic") else None)
+    scope = discover(store, cwd, session, explicit_plat or infer_platform(query))
     if scope["status"] != "DISCOVERED":
         return scope
     candidates = []

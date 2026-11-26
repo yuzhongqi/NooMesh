@@ -297,6 +297,16 @@ Microsoft Teams **Workflows** webhook notifies your personal chat (for example
     `teams-remote` heartbeat pickup—or spawns a fresh bounded read-only CLI session
     when you prefix `/new [@workspace] <prompt>` or when no live session is open,
     and replies with `/sessions` when asked to list open sessions.
+  - **Native macOS Menu Bar live dashboard (`llr menubar-*`):** Compile and launch a
+    zero-Dock-icon SwiftUI status bar utility (`brain.head.profile` template symbol +
+    live 24h knowledge-hit counter) that visualizes active IDE tasks, exact local
+    `Memo` / `Claim` / `Solution` items retrieved by each session, and one-click
+    HTML portal / offline `dream-pass` actions without resetting the Host idle timer:
+    ```sh
+    llr menubar-start --install-login-agent --approve
+    llr menubar-status
+    llr menubar-stop
+    ```
 
 These checks are wired into claim recall/search, progressive context,
 solution route/execute, dependency checks and context refresh. A pinned old view
@@ -650,7 +660,12 @@ workspace、凭据环境变量及经过外部核实的 hard cap 后才可发送�
 
 `preference` 支持明确偏好和 inferred 候选；显式确认与版本检查独立于操作权限。
 现有 `export-portal` 继续从本地库生成人可读 HTML 和 agent JSON，并包含解决
-contract、任务和学习 mission 状态。memo、graph、index 不是三份可独立编辑的事实。
+contract、任务和学习 mission 状态。在 macOS 上还可通过
+`llr menubar-start --install-login-agent --approve` 启动右上角状态栏原生面板
+（[CloneYourselfMenuBar.swift](adapters/macos_menubar/CloneYourselfMenuBar.swift)，无 Dock 图标、
+单实例 `flock` 锁、只读直连 SQLite 不重置 Host 10 分钟空闲休眠计时器），实时查看当前活跃任务调用了哪些
+本地 `Memo` / `Claim` / `P/R/Q 契约` 并一键打开 HTML 知识门户或触发离线巡检整理。
+memo、graph、index 不是三份可独立编辑的事实。
 私人数据、export、证据和客户配置都不上传 GitHub。
 
 ## 兼容的 v0.2 功能与详细参考

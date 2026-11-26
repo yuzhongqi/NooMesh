@@ -395,7 +395,9 @@ def tokenize(text: str) -> set:
 def search(store: Store, cwd: Path, query: str, session: str,
            actual: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     require(isinstance(query, str) and 0 < len(query.encode()) <= 4000, "Query exceeds limit or is empty")
-    found = discover(store, cwd, session, infer_platform(query))
+    explicit_plat = (actual.get("platform") if isinstance(actual, dict)
+                     and actual.get("platform") in ("android", "ios", "generic") else None)
+    found = discover(store, cwd, session, explicit_plat or infer_platform(query))
     if found["status"] != "DISCOVERED":
         return found
     workspace = found["workspace"]
