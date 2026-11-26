@@ -7,8 +7,10 @@ from local_learning_runtime.core import Store, file_digest
 from local_learning_runtime.discovery import register_alias
 from local_learning_runtime.inbox import register_live_session
 from local_learning_runtime.learning import authorize, search
-from local_learning_runtime.menubar import menubar_snapshot, open_live_portal, probe_menubar_running
+from local_learning_runtime.menubar import (menubar_item_detail, menubar_snapshot,
+                                            open_live_portal, probe_menubar_running)
 from local_learning_runtime.memos import propose_memo
+from local_learning_runtime.solutions import propose_solution
 
 
 class MenuBarDashboardTests(unittest.TestCase):
@@ -114,6 +116,98 @@ class MenuBarDashboardTests(unittest.TestCase):
         probed = probe_menubar_running(self.store.home)
         self.assertFalse(probed["running"])
         self.assertIsNone(probed["pid"])
+
+    def test_menubar_item_detail_returns_complete_memo_claim_and_solution_without_hit_inflation(self):
+        # Seed a verified Claim and a Solution in demo/android as well.
+        conds = {"platform": "android", "artifact_sha256": file_digest(self.anchor_file)}
+        ev = self.store.observe(
+            "ev-init-1", "demo/android", conds,
+            b'{"verified": true, "flag": "warm_reset"}', "application/json",
+        )
+        proposed_claim = self.store.propose({
+            "id": "warm-intent-claim",
+            "workspace": "demo/android",
+            "task_type": "intent-routing",
+            "statement": "Warm intent re-entry must refresh configuration before routing.",
+            "conditions": conds,
+            "anchors": [{
+                "path": "Initializer.kt",
+                "sha256": file_digest(self.anchor_file),
+                "symbols": ["Initializer", "boot"],
+            }],
+            "checks": [{
+                "kind": "json_equals",
+                "evidence_id": ev["evidence_id"],
+                "pointer": "/verified",
+                "expected": True,
+            }],
+            "dependencies": [],
+            "provenance": {
+                "title": "Warm intent config refresh claim",
+                "kind": "source_audit",
+                "task": "Audit warm intent",
+            },
+        })
+        self.store.accept(proposed_claim["candidate_id"], 0, None, True)
+
+        propose_solution(self.store, {
+            "schema": "llr.solution.v1",
+            "id": "check-init-baseline",
+            "workspace": "demo/android",
+            "problem": {
+                "intent": "init-baseline",
+                "goal": "Verify Initializer.kt baseline digest",
+                "patterns": ["check Initializer baseline"],
+            },
+            "parameters": {},
+            "preconditions": [{
+                "kind": "file_sha256",
+                "path": "Initializer.kt",
+                "expected": file_digest(self.anchor_file),
+            }],
+            "steps": [{"id": "s1", "op": "inspect_file", "path": "Initializer.kt"}],
+            "postconditions": [{
+                "step": "s1",
+                "pointer": "/sha256",
+                "expected": file_digest(self.anchor_file),
+            }],
+            "result": {"ok": True},
+            "boundaries": ["Only checks file digest"],
+        }, expected_version=0, approve=True)
+
+        hits_before = menubar_snapshot(self.store)["totals"]["today_hits"]
+
+        # Append an unrelated comment to Initializer.kt to trigger SOFT_DRIFT while keeping symbols.
+        self.anchor_file.write_text(
+            "// unrelated doc note\nobject Initializer {\n    fun boot() = true\n}\n",
+            encoding="utf-8",
+        )
+
+        memo_detail = menubar_item_detail(
+            self.store, "memo", "boot-once-guard", workspace="demo/android"
+        )
+        self.assertEqual(memo_detail["schema"], "llr.menubar_item.v1")
+        self.assertEqual(memo_detail["integrity_status"], "SOFT_DRIFT")
+        self.assertEqual(len(memo_detail["sections"]), 4)
+        self.assertIn("is a no-op on subsequent calls", memo_detail["sections"][2]["body"])
+        self.assertEqual(memo_detail["anchors"][0]["full_path"], str(self.anchor_file.resolve()))
+        self.assertIn("Initializer", memo_detail["anchors"][0]["symbols"])
+        self.assertIn("# [避坑 Memo] Initializer one-shot boot guard", memo_detail["copy_markdown"])
+
+        claim_detail = menubar_item_detail(self.store, "claim", "warm-intent-claim")
+        self.assertEqual(claim_detail["integrity_status"], "SOFT_DRIFT")
+        self.assertIn("Warm intent re-entry must refresh", claim_detail["sections"][0]["body"])
+        self.assertIn("warm_reset", claim_detail["sections"][2]["body"])
+
+        sol_detail = menubar_item_detail(
+            self.store, "solution", "check-init-baseline", workspace="demo/android"
+        )
+        self.assertEqual(sol_detail["kind"], "solution")
+        self.assertIn("Verify Initializer.kt baseline digest", sol_detail["title"])
+        self.assertIn("Only checks file digest", sol_detail["sections"][3]["body"])
+
+        hits_after = menubar_snapshot(self.store)["totals"]["today_hits"]
+        self.assertEqual(hits_before, hits_after)
 
 
 if __name__ == "__main__":

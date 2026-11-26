@@ -29,6 +29,7 @@ struct SessionKnowledgeItem: Decodable, Identifiable {
     var id: String { "\(kind):\(subject)" }
     let kind: String
     let subject: String
+    let workspace: String?
     let title: String
     let event: String
     let time_ago: String
@@ -73,6 +74,58 @@ struct MenuBarSnapshot: Decodable {
     let totals: TotalsSnapshot
     let live_sessions: [LiveSessionItem]
     let recent_activity: [ActivityFeedItem]
+}
+
+struct KnowledgeDetailSection: Decodable, Identifiable {
+    var id: String { label }
+    let label: String
+    let icon: String
+    let body: String
+}
+
+struct KnowledgeAnchorDetail: Decodable, Identifiable {
+    var id: String { "\(path):\(sha256_short)" }
+    let path: String
+    let full_path: String?
+    let sha256_short: String
+    let symbols: [String]
+    let status: String
+    let status_label: String
+}
+
+struct KnowledgeUsageSummary: Decodable {
+    let hit_count: Int
+    let last_hit_ago: String
+    let updated_ago: String
+}
+
+struct KnowledgeItemDetail: Decodable {
+    let schema: String
+    let kind: String
+    let badge: String
+    let id: String
+    let workspace: String
+    let title: String
+    let version: Int
+    let lifecycle: String
+    let integrity_status: String
+    let integrity_label: String
+    let tags: [String]
+    let sections: [KnowledgeDetailSection]
+    let anchors: [KnowledgeAnchorDetail]
+    let usage: KnowledgeUsageSummary
+    let copy_markdown: String
+}
+
+struct SelectedKnowledgeRef: Equatable {
+    let kind: String
+    let subject: String
+    let workspace: String?
+    let fallbackTitle: String
+
+    var cacheKey: String {
+        "\(kind):\(workspace ?? ""):\(subject)"
+    }
 }
 
 // MARK: - CLI Configuration
@@ -137,11 +190,20 @@ final class DashboardViewModel: ObservableObject {
     @Published var isBusyAction: Bool = false
     @Published var toastMessage: String = ""
     @Published var popoverVisible: Bool = false
+    @Published var selectedRef: SelectedKnowledgeRef? = nil
+    @Published var selectedDetail: KnowledgeItemDetail? = nil
+    @Published var isLoadingDetail: Bool = false
+    @Published var detailError: String? = nil
 
     let cli: RuntimeCLI
     var onStatusBarChange: ((MenuBarSnapshot?) -> Void)?
     private var timer: Timer?
     private var fetchInFlight = false
+    private var detailCache: [String: KnowledgeItemDetail] = [:]
+
+    var isShowingDetail: Bool {
+        selectedRef != nil
+    }
 
     init(cli: RuntimeCLI) {
         self.cli = cli
@@ -229,6 +291,82 @@ final class DashboardViewModel: ObservableObject {
                 self?.showTemporaryToast("已完成离线锚点巡检与整理")
                 self?.refreshNow()
             }
+        }
+    }
+
+    func openKnowledgeDetail(kind: String, subject: String, workspace: String?, fallbackTitle: String) {
+        let cleanWS = (workspace?.isEmpty == false) ? workspace : nil
+        let ref = SelectedKnowledgeRef(
+            kind: kind,
+            subject: subject,
+            workspace: cleanWS,
+            fallbackTitle: fallbackTitle
+        )
+        detailError = nil
+        if let cached = detailCache[ref.cacheKey] {
+            selectedDetail = cached
+            isLoadingDetail = false
+        } else {
+            selectedDetail = nil
+            isLoadingDetail = true
+        }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+            selectedRef = ref
+        }
+        let localCLI = cli
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var args = ["menubar-item", "--kind", kind, "--subject", subject]
+            if let ws = cleanWS {
+                args += ["--workspace", ws]
+            }
+            let data = localCLI.executeJSON(args)
+            let decoded: KnowledgeItemDetail?
+            if let data = data {
+                decoded = try? JSONDecoder().decode(KnowledgeItemDetail.self, from: data)
+            } else {
+                decoded = nil
+            }
+            DispatchQueue.main.async {
+                guard let self = self, self.selectedRef == ref else { return }
+                self.isLoadingDetail = false
+                if let decoded = decoded {
+                    self.detailCache[ref.cacheKey] = decoded
+                    self.selectedDetail = decoded
+                } else if self.selectedDetail == nil {
+                    self.detailError = "未能读取该条本地知识的完整内容"
+                }
+            }
+        }
+    }
+
+    func closeKnowledgeDetail() {
+        guard selectedRef != nil else { return }
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+            selectedRef = nil
+        }
+    }
+
+    func resetDetailWithoutAnimation() {
+        selectedRef = nil
+        detailError = nil
+        isLoadingDetail = false
+    }
+
+    func copySelectedDetailMarkdown() {
+        guard let md = selectedDetail?.copy_markdown, !md.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(md, forType: .string)
+        showTemporaryToast("已复制完整知识内容到剪贴板")
+    }
+
+    func openSourceFile(_ fullPath: String) {
+        let fileURL = URL(fileURLWithPath: fullPath)
+        if let vscodeURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.VSCode") {
+            let cfg = NSWorkspace.OpenConfiguration()
+            NSWorkspace.shared.open([fileURL], withApplicationAt: vscodeURL, configuration: cfg, completionHandler: nil)
+        } else {
+            NSWorkspace.shared.open(fileURL)
         }
     }
 
@@ -564,9 +702,56 @@ struct KnowledgeKindTag: View {
     }
 }
 
+struct SessionKnowledgeRowButton: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+    let item: SessionKnowledgeItem
+    let fallbackWorkspace: String
+    let onSelect: (String, String, String?, String) -> Void
+
+    var body: some View {
+        Button(action: {
+            let ws = (item.workspace?.isEmpty == false) ? item.workspace : fallbackWorkspace
+            onSelect(item.kind, item.subject, ws, item.title)
+        }) {
+            HStack(spacing: 6) {
+                KnowledgeKindTag(kind: item.kind)
+                Text(item.title)
+                    .font(.system(size: 11))
+                    .foregroundColor(GlassPalette.primaryLabel)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(item.time_ago)
+                    .font(.system(size: 10))
+                    .foregroundColor(GlassPalette.tertiaryLabel)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8.5, weight: .semibold))
+                    .foregroundColor(isHovering ? GlassPalette.primaryLabel : GlassPalette.tertiaryLabel)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3.5)
+            .background(
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .fill(
+                        isHovering
+                            ? (colorScheme == .dark ? Color.white.opacity(0.11) : Color.white.opacity(0.62))
+                            : Color.clear
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 7.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .help("点击查看该条本地知识的完整内容")
+    }
+}
+
 struct SessionCardView: View {
     @Environment(\.colorScheme) private var colorScheme
     let item: LiveSessionItem
+    let onSelectKnowledge: (String, String, String?, String) -> Void
 
     var isRunning: Bool { item.state == "active" }
 
@@ -624,27 +809,22 @@ struct SessionCardView: View {
                 Rectangle()
                     .fill(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.45))
                     .frame(height: 0.6)
-                VStack(alignment: .leading, spacing: 4.5) {
+                VStack(alignment: .leading, spacing: 2.5) {
                     HStack(spacing: 4.5) {
                         Image(systemName: "sparkles")
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundColor(GlassPalette.secondaryLabel)
-                        Text("已调用本地知识 (\(item.knowledge_used.count))")
+                        Text("已调用本地知识 (\(item.knowledge_used.count)) · 点击查看全文")
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundColor(GlassPalette.secondaryLabel)
                     }
+                    .padding(.bottom, 1.5)
                     ForEach(item.knowledge_used) { k in
-                        HStack(spacing: 6) {
-                            KnowledgeKindTag(kind: k.kind)
-                            Text(k.title)
-                                .font(.system(size: 11))
-                                .foregroundColor(GlassPalette.primaryLabel)
-                                .lineLimit(1)
-                            Spacer(minLength: 4)
-                            Text(k.time_ago)
-                                .font(.system(size: 10))
-                                .foregroundColor(GlassPalette.tertiaryLabel)
-                        }
+                        SessionKnowledgeRowButton(
+                            item: k,
+                            fallbackWorkspace: item.workspace,
+                            onSelect: onSelectKnowledge
+                        )
                     }
                 }
             } else {
@@ -659,56 +839,327 @@ struct SessionCardView: View {
 }
 
 struct ActivityRowView: View {
+    @State private var isHovering = false
     let item: ActivityFeedItem
+    let onSelect: (String, String, String?, String) -> Void
 
     var isLearned: Bool { item.event_type == "learned" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5.5) {
-            HStack(spacing: 6) {
-                HStack(spacing: 3.5) {
-                    Image(systemName: isLearned ? "checkmark.circle.fill" : "arrow.turn.down.right")
-                        .font(.system(size: 9.5, weight: .medium))
-                    Text(item.action)
-                        .font(.system(size: 10.5, weight: .medium))
+        Button(action: {
+            onSelect(item.kind, item.subject, item.workspace, item.title)
+        }) {
+            VStack(alignment: .leading, spacing: 5.5) {
+                HStack(spacing: 6) {
+                    HStack(spacing: 3.5) {
+                        Image(systemName: isLearned ? "checkmark.circle.fill" : "arrow.turn.down.right")
+                            .font(.system(size: 9.5, weight: .medium))
+                        Text(item.action)
+                            .font(.system(size: 10.5, weight: .medium))
+                    }
+                    .foregroundColor(GlassPalette.secondaryLabel)
+
+                    KnowledgeKindTag(kind: item.kind)
+
+                    Text(item.workspace)
+                        .font(.system(size: 10.5))
+                        .foregroundColor(GlassPalette.tertiaryLabel)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text(item.time_ago)
+                        .font(.system(size: 10))
+                        .foregroundColor(GlassPalette.tertiaryLabel)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(isHovering ? GlassPalette.primaryLabel : GlassPalette.tertiaryLabel)
                 }
-                .foregroundColor(GlassPalette.secondaryLabel)
 
-                KnowledgeKindTag(kind: item.kind)
+                Text(item.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(GlassPalette.primaryLabel)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
 
-                Text(item.workspace)
-                    .font(.system(size: 10.5))
-                    .foregroundColor(GlassPalette.tertiaryLabel)
-                    .lineLimit(1)
+                if !item.task_title.isEmpty {
+                    HStack(spacing: 4) {
+                        Text(item.session_short)
+                            .font(.system(size: 10, weight: .regular, design: .monospaced))
+                            .foregroundColor(GlassPalette.tertiaryLabel)
+                        Text("·")
+                            .foregroundColor(GlassPalette.tertiaryLabel)
+                        Text(item.task_title)
+                            .font(.system(size: 10.5))
+                            .foregroundColor(GlassPalette.secondaryLabel)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(11)
+            .liquidDroplet(cornerRadius: 15, emphasized: isHovering, activeRim: isHovering)
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .help("点击查看完整知识经验")
+    }
+}
+
+struct KnowledgeDetailView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject var vm: DashboardViewModel
+
+    private func integrityDotColor(_ status: String) -> Color {
+        switch status {
+        case "PASS":
+            return GlassPalette.onlineDot
+        case "SOFT_DRIFT":
+            return Color(nsColor: .systemOrange)
+        default:
+            return Color(nsColor: .systemRed)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                LiquidCapsuleButton(
+                    title: "返回列表",
+                    systemImage: "chevron.left",
+                    disabled: false,
+                    action: { vm.closeKnowledgeDetail() }
+                )
 
                 Spacer()
 
-                Text(item.time_ago)
-                    .font(.system(size: 10))
-                    .foregroundColor(GlassPalette.tertiaryLabel)
+                if vm.selectedDetail != nil {
+                    LiquidCapsuleButton(
+                        title: "复制全文",
+                        systemImage: "doc.on.doc",
+                        disabled: false,
+                        action: { vm.copySelectedDetailMarkdown() }
+                    )
+                }
             }
 
-            Text(item.title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(GlassPalette.primaryLabel)
-                .lineLimit(2)
+            if let detail = vm.selectedDetail {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        overviewCard(detail)
 
-            if !item.task_title.isEmpty {
-                HStack(spacing: 4) {
-                    Text(item.session_short)
-                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        ForEach(detail.sections) { sec in
+                            sectionCard(sec)
+                        }
+
+                        if !detail.anchors.isEmpty {
+                            anchorsCard(detail.anchors)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            } else if vm.isLoadingDetail {
+                Spacer()
+                ProgressView("正在读取完整知识经验…")
+                    .font(.system(size: 12))
+                Spacer()
+            } else {
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 24, weight: .light))
                         .foregroundColor(GlassPalette.tertiaryLabel)
-                    Text("·")
-                        .foregroundColor(GlassPalette.tertiaryLabel)
-                    Text(item.task_title)
-                        .font(.system(size: 10.5))
+                    Text(vm.detailError ?? "未找到该条本地知识")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(GlassPalette.secondaryLabel)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private func overviewCard(_ detail: KnowledgeItemDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                KnowledgeKindTag(kind: detail.kind)
+                Text(detail.workspace)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                    .lineLimit(1)
+                Text("v\(detail.version)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(GlassPalette.tertiaryLabel)
+                Spacer()
+                HStack(spacing: 4.5) {
+                    Circle()
+                        .fill(integrityDotColor(detail.integrity_status))
+                        .frame(width: 6, height: 6)
+                    Text(detail.integrity_label)
+                        .font(.system(size: 10))
                         .foregroundColor(GlassPalette.secondaryLabel)
                         .lineLimit(1)
                 }
             }
+
+            Text(detail.title)
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundColor(GlassPalette.primaryLabel)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            HStack(spacing: 6) {
+                Text("ID: \(detail.id)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(GlassPalette.tertiaryLabel)
+                    .lineLimit(1)
+                    .textSelection(.enabled)
+                Spacer()
+                Text("累计调用 \(detail.usage.hit_count) 次 · 最近 \(detail.usage.last_hit_ago)")
+                    .font(.system(size: 10))
+                    .foregroundColor(GlassPalette.tertiaryLabel)
+            }
+
+            if !detail.tags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        ForEach(detail.tags, id: \.self) { tag in
+                            Text(tag)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(GlassPalette.secondaryLabel)
+                                .padding(.horizontal, 6.5)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(GlassPalette.microCapsuleFill(colorScheme))
+                                )
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.5)
+                                )
+                        }
+                    }
+                }
+            }
         }
-        .padding(11)
-        .liquidDroplet(cornerRadius: 15)
+        .padding(12)
+        .liquidDroplet(cornerRadius: 16, emphasized: true, activeRim: true, interactiveHover: false)
+    }
+
+    private func sectionCard(_ sec: KnowledgeDetailSection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: sec.icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                Text(sec.label)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                Spacer()
+            }
+
+            Text(sec.body)
+                .font(.system(size: 11.5, weight: .regular))
+                .lineSpacing(2.8)
+                .foregroundColor(GlassPalette.primaryLabel)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        }
+        .padding(11.5)
+        .liquidDroplet(cornerRadius: 15, interactiveHover: false)
+    }
+
+    private func anchorsCard(_ anchors: [KnowledgeAnchorDetail]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 5) {
+                Image(systemName: "link")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                Text("绑定源码与符号锚点 (\(anchors.count))")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                Spacer()
+            }
+
+            ForEach(Array(anchors.enumerated()), id: \.element.id) { index, anchor in
+                if index > 0 {
+                    Rectangle()
+                        .fill(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.45))
+                        .frame(height: 0.6)
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(integrityDotColor(anchor.status))
+                            .frame(width: 5.5, height: 5.5)
+                        Text((anchor.path as NSString).lastPathComponent)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(GlassPalette.primaryLabel)
+                            .lineLimit(1)
+                        Text(anchor.status_label)
+                            .font(.system(size: 9.5))
+                            .foregroundColor(GlassPalette.tertiaryLabel)
+                        Spacer()
+                        if let fullPath = anchor.full_path {
+                            Button(action: { vm.openSourceFile(fullPath) }) {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "arrow.up.forward.app")
+                                        .font(.system(size: 9, weight: .medium))
+                                    Text("打开源码")
+                                        .font(.system(size: 9.5, weight: .medium))
+                                }
+                                .foregroundColor(GlassPalette.primaryLabel)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2.5)
+                                .background(
+                                    Capsule()
+                                        .fill(GlassPalette.microCapsuleFill(colorScheme))
+                                )
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.55)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    Text(anchor.path)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(GlassPalette.tertiaryLabel)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                    if !anchor.symbols.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 5) {
+                                ForEach(anchor.symbols, id: \.self) { sym in
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "curlybraces")
+                                            .font(.system(size: 8))
+                                        Text(sym)
+                                            .font(.system(size: 9.5, design: .monospaced))
+                                    }
+                                    .foregroundColor(GlassPalette.secondaryLabel)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        Capsule()
+                                            .fill(GlassPalette.recessedChannelFill(colorScheme))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(11.5)
+        .liquidDroplet(cornerRadius: 15, interactiveHover: false)
     }
 }
 
@@ -764,50 +1215,80 @@ struct DashboardPopoverView: View {
 
     var body: some View {
         VStack(spacing: 11) {
-            headerSection
-            if let snap = vm.snapshot {
-                metricsSection(snap)
-                LiquidSegmentedBar(
-                    selection: $vm.selectedTab,
-                    leftTitle: "当前会话任务 (\(snap.live_sessions.count))",
-                    rightTitle: "知识调用与学习 (\(snap.recent_activity.count))"
-                )
+            if vm.isShowingDetail {
+                KnowledgeDetailView(vm: vm)
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        )
+                    )
+            } else {
+                headerSection
+                if let snap = vm.snapshot {
+                    metricsSection(snap)
+                    LiquidSegmentedBar(
+                        selection: $vm.selectedTab,
+                        leftTitle: "当前会话任务 (\(snap.live_sessions.count))",
+                        rightTitle: "知识调用与学习 (\(snap.recent_activity.count))"
+                    )
 
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 8.5) {
-                        if vm.selectedTab == 0 {
-                            if snap.live_sessions.isEmpty {
-                                emptyState(
-                                    icon: "rectangle.stack",
-                                    title: "当前没有活跃 IDE 会话心跳",
-                                    subtitle: "打开 VS Code 或 Codex 对话后，这里会实时展示正在执行的任务与命中的本地知识。"
-                                )
-                            } else {
-                                ForEach(snap.live_sessions) { sess in
-                                    SessionCardView(item: sess)
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 8.5) {
+                            if vm.selectedTab == 0 {
+                                if snap.live_sessions.isEmpty {
+                                    emptyState(
+                                        icon: "rectangle.stack",
+                                        title: "当前没有活跃 IDE 会话心跳",
+                                        subtitle: "打开 VS Code 或 Codex 对话后，这里会实时展示正在执行的任务与命中的本地知识。"
+                                    )
+                                } else {
+                                    ForEach(snap.live_sessions) { sess in
+                                        SessionCardView(
+                                            item: sess,
+                                            onSelectKnowledge: { kind, subject, ws, title in
+                                                vm.openKnowledgeDetail(
+                                                    kind: kind,
+                                                    subject: subject,
+                                                    workspace: ws,
+                                                    fallbackTitle: title
+                                                )
+                                            }
+                                        )
+                                    }
                                 }
-                            }
-                        } else {
-                            if snap.recent_activity.isEmpty {
-                                emptyState(
-                                    icon: "sparkles.rectangle.stack",
-                                    title: "尚无本地知识调用流水",
-                                    subtitle: "当 Agent 命中本地 Memo / Claim 或完成验证沉淀时，这里会实时记录。"
-                                )
                             } else {
-                                ForEach(snap.recent_activity) { act in
-                                    ActivityRowView(item: act)
+                                if snap.recent_activity.isEmpty {
+                                    emptyState(
+                                        icon: "sparkles.rectangle.stack",
+                                        title: "尚无本地知识调用流水",
+                                        subtitle: "当 Agent 命中本地 Memo / Claim 或完成验证沉淀时，这里会实时记录。"
+                                    )
+                                } else {
+                                    ForEach(snap.recent_activity) { act in
+                                        ActivityRowView(
+                                            item: act,
+                                            onSelect: { kind, subject, ws, title in
+                                                vm.openKnowledgeDetail(
+                                                    kind: kind,
+                                                    subject: subject,
+                                                    workspace: ws,
+                                                    fallbackTitle: title
+                                                )
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
+                        .padding(.vertical, 2)
                     }
-                    .padding(.vertical, 2)
+                } else {
+                    Spacer()
+                    ProgressView("正在读取本地知识库…")
+                        .font(.system(size: 12))
+                    Spacer()
                 }
-            } else {
-                Spacer()
-                ProgressView("正在读取本地知识库…")
-                    .font(.system(size: 12))
-                Spacer()
             }
 
             footerSection
@@ -1145,6 +1626,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         removeDismissMonitors()
         statusItem.button?.highlight(false)
         viewModel.setPopoverVisible(false)
+        viewModel.resetDetailWithoutAnimation()
         panel.orderOut(nil)
     }
 
@@ -1167,7 +1649,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 { // Escape
                 Task { @MainActor [weak self] in
-                    self?.closePanel()
+                    guard let self = self else { return }
+                    if self.viewModel.isShowingDetail {
+                        self.viewModel.closeKnowledgeDetail()
+                    } else {
+                        self.closePanel()
+                    }
                 }
                 return nil
             }

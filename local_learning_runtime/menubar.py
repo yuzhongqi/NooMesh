@@ -12,7 +12,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .core import RuntimeErrorBase, Store, canonical, file_digest, now, require, require_private_location
+from .core import (RuntimeErrorBase, Store, canonical, file_digest, now,
+                   require, require_private_location, verify_anchor, workspace_file)
 from .inbox import load_inbox_config
 from .knowledge import export_portal
 from .lifecycle import parsed
@@ -226,18 +227,19 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
     # Map session -> distinct used knowledge items
     session_knowledge: Dict[str, List[Dict[str, str]]] = {}
     for row in store.db.execute(
-        "SELECT session,kind,subject,event,occurred_at FROM memory_events "
+        "SELECT session,workspace,kind,subject,event,occurred_at FROM memory_events "
         "WHERE event IN ('retrieved','expanded','selected','executed') "
         "ORDER BY occurred_at DESC LIMIT 200"
     ):
         sid = row["session"]
         items = session_knowledge.setdefault(sid, [])
-        if len(items) >= 4 or any(x["subject"] == row["subject"] for x in items):
+        if len(items) >= 4 or any(x["subject"] == row["subject"] and x["kind"] == row["kind"] for x in items):
             continue
         meta = lookup.get((row["kind"], row["subject"]), {})
         items.append({
             "kind": row["kind"],
             "subject": row["subject"],
+            "workspace": row["workspace"] or meta.get("workspace", ""),
             "title": meta.get("title", row["subject"])[:64],
             "event": row["event"],
             "time_ago": relative_time_zh(row["occurred_at"], clock),
@@ -363,6 +365,338 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
         },
         "live_sessions": sessions_out,
         "recent_activity": activity_feed,
+    }
+
+
+def _resolve_anchor_details(store: Store, workspace: str,
+                            anchors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    try:
+        ws_root = Path(store.workspace(workspace)["root"]).resolve()
+    except (RuntimeErrorBase, OSError):
+        ws_root = None
+    resolved_list: List[Dict[str, Any]] = []
+    for anchor in anchors:
+        rel_path = str(anchor.get("path", ""))
+        sha_val = str(anchor.get("sha256", ""))
+        symbols = [str(s) for s in anchor.get("symbols", [])]
+        full_path: Optional[str] = None
+        anchor_status = "UNKNOWN"
+        status_label = "未校验"
+        if ws_root is not None:
+            try:
+                candidate = workspace_file(ws_root, rel_path)
+                if candidate.is_file():
+                    full_path = str(candidate)
+            except (RuntimeErrorBase, OSError):
+                full_path = None
+            try:
+                ver = verify_anchor(ws_root, anchor, require_exact=False)
+                anchor_status = ver.get("status", "PASS")
+                status_label = "符号仍在 (局部改动)" if anchor_status == "SOFT_DRIFT" else "源码一致"
+            except (RuntimeErrorBase, OSError, ValueError):
+                anchor_status = "BLOCKED"
+                status_label = "已变更 / 缺失"
+        resolved_list.append({
+            "path": rel_path,
+            "full_path": full_path,
+            "sha256_short": sha_val[:12],
+            "symbols": symbols,
+            "status": anchor_status,
+            "status_label": status_label,
+        })
+    return resolved_list
+
+
+def _format_kv_lines(mapping: Dict[str, Any]) -> str:
+    if not mapping:
+        return "（无特定限制）"
+    lines = []
+    for k, v in sorted(mapping.items()):
+        val_str = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
+        lines.append(f"• {k}: {val_str}")
+    return "\n".join(lines)
+
+
+def menubar_item_detail(store: Store, kind: str, subject: str,
+                        workspace: Optional[str] = None) -> Dict[str, Any]:
+    require(kind in ("memo", "claim", "solution"), "Unknown knowledge item kind")
+    require(isinstance(subject, str) and 0 < len(subject.strip()) <= 200, "Invalid knowledge subject")
+    clock = datetime.now(timezone.utc)
+    kind_badges = {
+        "memo": "避坑 Memo",
+        "claim": "实证 Claim",
+        "solution": "P/R/Q 契约",
+    }
+
+    sections: List[Dict[str, str]] = []
+    anchors_out: List[Dict[str, Any]] = []
+    tags: List[str] = []
+    integrity_status = "PASS"
+    integrity_label = "校验通过"
+    version = 1
+    lifecycle = "active"
+    updated_at_iso = ""
+    title = subject
+    resolved_ws = workspace or ""
+
+    if kind == "memo":
+        from .memos import verify_memo_live
+        if workspace:
+            row = store.db.execute(
+                "SELECT * FROM memos WHERE workspace=? AND id=?", (workspace, subject)
+            ).fetchone()
+        else:
+            row = store.db.execute(
+                "SELECT * FROM memos WHERE id=? ORDER BY updated_at DESC LIMIT 1", (subject,)
+            ).fetchone()
+        require(row is not None, f"Memo not found: {subject}")
+        resolved_ws = row["workspace"]
+        version = int(row["version"])
+        lifecycle = str(row["lifecycle"])
+        updated_at_iso = str(row["updated_at"] or "")
+        spec = json.loads(row["body"])
+        title = str(spec.get("title", subject))
+        memo_subkind = "避坑警示 (Trap)" if spec.get("kind") == "trap" else "架构规则 (Rule)"
+        tags = [memo_subkind] + [f"#{t}" for t in spec.get("tags", [])]
+        try:
+            ver = verify_memo_live(store, resolved_ws, subject)
+            if ver.get("anchor_drift"):
+                integrity_status = "SOFT_DRIFT"
+                integrity_label = "软漂移可用 · 关键符号仍在"
+            else:
+                integrity_status = "PASS"
+                integrity_label = "校验通过 · 锚点一致"
+        except (RuntimeErrorBase, OSError, ValueError) as exc:
+            integrity_status = "BLOCKED"
+            integrity_label = "已阻断 · " + str(exc)[:72]
+
+        ver_obj = spec.get("verification", {})
+        sections = [
+            {"label": "触发场景 (When)", "icon": "scope", "body": str(spec.get("when", ""))},
+            {"label": "核心规则与做法 (Rule)", "icon": "checkmark.shield", "body": str(spec.get("rule", ""))},
+            {"label": "常见踩坑与后果 (Trap)", "icon": "exclamationmark.triangle", "body": str(spec.get("trap", ""))},
+            {
+                "label": f"验证依据 ({ver_obj.get('method', 'source_symbol_contract')})",
+                "icon": "checkmark.seal",
+                "body": str(ver_obj.get("summary", "")),
+            },
+        ]
+        anchors_out = _resolve_anchor_details(store, resolved_ws, ver_obj.get("anchors", []))
+
+    elif kind == "claim":
+        row = store.db.execute("SELECT id,body FROM claims WHERE id=?", (subject,)).fetchone()
+        require(row is not None, f"Claim not found: {subject}")
+        claim_obj = json.loads(row["body"])
+        spec = claim_obj["spec"]
+        resolved_ws = str(spec["workspace"])
+        version = int(claim_obj.get("version", 1))
+        lifecycle = str(claim_obj.get("lifecycle", "active"))
+        prov = spec.get("provenance", {})
+        updated_at_iso = str(prov.get("validated_at", ""))
+        title = str(prov.get("title") or spec["statement"][:96])
+        tags = [f"类型: {spec.get('task_type', 'general')}"]
+        if prov.get("kind"):
+            tags.append(f"来源: {prov['kind']}")
+
+        snapshot = store.snapshot()
+        try:
+            store.current_valid(claim_obj, snapshot, spec["conditions"])
+            drift = store.verify(spec).get("anchor_drift", [])
+            if drift:
+                integrity_status = "SOFT_DRIFT"
+                integrity_label = "软漂移可用 · 关键符号仍在"
+            else:
+                integrity_status = "PASS"
+                integrity_label = "校验通过 · 证据与锚点有效"
+        except (RuntimeErrorBase, OSError, ValueError) as exc:
+            integrity_status = "BLOCKED"
+            integrity_label = "已阻断 · " + str(exc)[:72]
+
+        check_lines: List[str] = []
+        seen_evidence = set()
+        for idx, chk in enumerate(spec.get("checks", []), 1):
+            c_kind = chk.get("kind", "predicate")
+            eid = str(chk.get("evidence_id", ""))
+            if c_kind == "json_equals":
+                exp = json.dumps(chk.get("expected"), ensure_ascii=False)
+                check_lines.append(f"{idx}. [JSON 断言] {chk.get('pointer')} == {exp}")
+            else:
+                sel = json.dumps(chk.get("selector", chk), ensure_ascii=False)
+                check_lines.append(f"{idx}. [{c_kind}] {sel}")
+            if eid and eid not in seen_evidence:
+                seen_evidence.add(eid)
+                try:
+                    ev_row, raw_bytes = store.evidence(eid)
+                    mtype = ev_row["media_type"]
+                    if mtype == "application/json":
+                        pretty = json.dumps(json.loads(raw_bytes), ensure_ascii=False, indent=2)
+                        if len(pretty) > 700:
+                            pretty = pretty[:700] + "\n  … (证据已截断展示)"
+                        check_lines.append(f"   证据摘录 ({eid[:12]}):\n{pretty}")
+                    else:
+                        check_lines.append(
+                            f"   二进制/结构化证据 ({mtype}, {len(raw_bytes)} bytes, sha256: {ev_row['sha256'][:12]})"
+                        )
+                except (RuntimeErrorBase, OSError, ValueError):
+                    check_lines.append(f"   证据引用: {eid[:16]} (本地文件未命中)")
+
+        prov_lines = []
+        if prov.get("task"):
+            prov_lines.append(f"• 沉淀任务: {prov['task']}")
+        if prov.get("kind"):
+            prov_lines.append(f"• 验证方式: {prov['kind']}")
+        if prov.get("session"):
+            prov_lines.append(f"• 来源会话: #{str(prov['session'])[:8]}")
+        if prov.get("validated_at"):
+            prov_lines.append(f"• 验证时间: {str(prov['validated_at'])[:19].replace('T', ' ')} UTC")
+        ver_meaning = claim_obj.get("verification", {}).get("meaning")
+        if ver_meaning:
+            prov_lines.append(f"• 边界说明: {ver_meaning}")
+
+        sections = [
+            {"label": "完整经验结论 (Statement)", "icon": "doc.text", "body": str(spec["statement"])},
+            {"label": "适用条件边界 (Conditions)", "icon": "slider.horizontal.3",
+             "body": _format_kv_lines(spec.get("conditions", {}))},
+            {"label": "本地断言与证据 (Predicates & Evidence)", "icon": "checkmark.rectangle.stack",
+             "body": "\n".join(check_lines) if check_lines else "（无断言明细）"},
+        ]
+        if prov_lines:
+            sections.append({
+                "label": "验证溯源 (Provenance)",
+                "icon": "clock.arrow.circlepath",
+                "body": "\n".join(prov_lines),
+            })
+        anchors_out = _resolve_anchor_details(store, resolved_ws, spec.get("anchors", []))
+
+    else:  # solution
+        from .solutions import check_preconditions, get_solution
+        if workspace:
+            row = store.db.execute(
+                "SELECT workspace,id FROM solutions WHERE workspace=? AND id=?", (workspace, subject)
+            ).fetchone()
+        else:
+            row = store.db.execute(
+                "SELECT workspace,id FROM solutions WHERE id=? ORDER BY updated_at DESC LIMIT 1", (subject,)
+            ).fetchone()
+        require(row is not None, f"Solution not found: {subject}")
+        resolved_ws = row["workspace"]
+        record = get_solution(store, resolved_ws, subject)
+        spec = record["spec"]
+        version = int(record["version"])
+        lifecycle = str(record["lifecycle"])
+        updated_at_iso = str(record.get("updated_at") or "")
+        prob = spec.get("problem", {})
+        title = str(prob.get("goal", subject))
+        tags = [f"状态: {lifecycle}"]
+        if prob.get("intent"):
+            tags.append(f"意图: {prob['intent']}")
+
+        if lifecycle != "verified":
+            integrity_status = "BLOCKED"
+            integrity_label = f"尚未完全验证 ({lifecycle})"
+        elif not spec.get("parameters"):
+            pre_res = check_preconditions(store, record, {}, {})
+            if any(r["verdict"] == "FAIL" for r in pre_res):
+                integrity_status = "BLOCKED"
+                integrity_label = "前置条件或基线指纹不匹配"
+            else:
+                integrity_status = "PASS"
+                integrity_label = "已验证契约 · 零模型可执行"
+        else:
+            integrity_status = "PASS"
+            integrity_label = "已验证契约 · 按已审批参数枚举执行"
+
+        pattern_lines = [f"目标: {prob.get('goal', '')}"]
+        if prob.get("patterns"):
+            pattern_lines.append("匹配指令模板:")
+            for pat in prob["patterns"]:
+                pattern_lines.append(f"  • {pat}")
+        if spec.get("parameters"):
+            pattern_lines.append("枚举参数边界:")
+            for pname, pdef in spec["parameters"].items():
+                enums = ", ".join(json.dumps(x, ensure_ascii=False) for x in pdef.get("enum", []))
+                pattern_lines.append(f"  • {pname} ({pdef.get('type')}): [{enums}]")
+
+        pre_lines = []
+        sol_anchors = []
+        for idx, pre in enumerate(spec.get("preconditions", []), 1):
+            pkind = pre.get("kind")
+            if pkind == "file_sha256" and isinstance(pre.get("path"), str) and isinstance(pre.get("expected"), str):
+                pre_lines.append(f"{idx}. [文件指纹] {pre['path']} == {pre['expected'][:16]}…")
+                sol_anchors.append({"path": pre["path"], "sha256": pre["expected"], "symbols": []})
+            else:
+                pre_lines.append(f"{idx}. {json.dumps(pre, ensure_ascii=False)}")
+
+        step_lines = []
+        for idx, st in enumerate(spec.get("steps", []), 1):
+            op = st.get("op", "step")
+            sid = st.get("id", str(idx))
+            detail = st.get("path") or st.get("runner") or ""
+            step_lines.append(f"{idx}. [{op}] ({sid}) {detail}".strip())
+
+        post_lines = []
+        for idx, post in enumerate(spec.get("postconditions", []), 1):
+            exp = json.dumps(post.get("expected"), ensure_ascii=False)
+            post_lines.append(f"{idx}. 步骤 {post.get('step')}{post.get('pointer')} == {exp}")
+        if spec.get("boundaries"):
+            post_lines.append("明确不承诺边界:")
+            for b in spec["boundaries"]:
+                post_lines.append(f"  • {b}")
+
+        sections = [
+            {"label": "解决目标与触发模板 (Goal & Patterns)", "icon": "bolt.horizontal",
+             "body": "\n".join(pattern_lines)},
+            {"label": "前置条件 P (Preconditions)", "icon": "lock.shield",
+             "body": "\n".join(pre_lines) if pre_lines else "（无额外前置条件）"},
+            {"label": "确定性执行步骤 R (Steps)", "icon": "list.number",
+             "body": "\n".join(step_lines) if step_lines else "（无步骤）"},
+            {"label": "结果断言 Q 与边界 (Postconditions & Boundaries)", "icon": "checkmark.seal",
+             "body": "\n".join(post_lines) if post_lines else "（无后置断言）"},
+        ]
+        anchors_out = _resolve_anchor_details(store, resolved_ws, sol_anchors)
+
+    # Usage statistics from memory_events (pure read)
+    hit_row = store.db.execute(
+        "SELECT count(*), max(occurred_at) FROM memory_events "
+        "WHERE kind=? AND subject=? AND event IN ('retrieved','expanded','selected','executed')",
+        (kind, subject),
+    ).fetchone()
+    hit_count = int(hit_row[0] or 0)
+    last_hit_at = hit_row[1]
+
+    md_parts = [
+        f"# [{kind_badges.get(kind, kind)}] {title}",
+        f"- ID: `{subject}`",
+        f"- Workspace: `{resolved_ws}` · Version: `v{version}` · 状态: `{integrity_label}`",
+    ]
+    for sec in sections:
+        md_parts.append(f"\n## {sec['label']}\n{sec['body']}")
+    if anchors_out:
+        md_parts.append("\n## 绑定源码锚点")
+        for a in anchors_out:
+            sym_txt = f" (symbols: {', '.join(a['symbols'])})" if a["symbols"] else ""
+            md_parts.append(f"- `{a['path']}` [{a['status_label']}]{sym_txt}")
+
+    return {
+        "schema": "llr.menubar_item.v1",
+        "kind": kind,
+        "badge": kind_badges.get(kind, kind),
+        "id": subject,
+        "workspace": resolved_ws,
+        "title": title,
+        "version": version,
+        "lifecycle": lifecycle,
+        "integrity_status": integrity_status,
+        "integrity_label": integrity_label,
+        "tags": tags,
+        "sections": sections,
+        "anchors": anchors_out,
+        "usage": {
+            "hit_count": hit_count,
+            "last_hit_ago": relative_time_zh(last_hit_at, clock) if last_hit_at else "尚无调用",
+            "updated_ago": relative_time_zh(updated_at_iso, clock) if updated_at_iso else "",
+        },
+        "copy_markdown": "\n".join(md_parts),
     }
 
 

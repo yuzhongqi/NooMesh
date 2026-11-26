@@ -298,10 +298,12 @@ Microsoft Teams **Workflows** webhook notifies your personal chat (for example
     when you prefix `/new [@workspace] <prompt>` or when no live session is open,
     and replies with `/sessions` when asked to list open sessions.
   - **Native macOS Menu Bar live dashboard (`llr menubar-*`):** Compile and launch a
-    zero-Dock-icon SwiftUI status bar utility (`brain.head.profile` template symbol +
-    live 24h knowledge-hit counter) that visualizes active IDE tasks, exact local
-    `Memo` / `Claim` / `Solution` items retrieved by each session, and one-click
-    HTML portal / offline `dream-pass` actions without resetting the Host idle timer:
+    zero-Dock-icon Liquid Glass status bar utility (`brain.head.profile` template
+    symbol + live 24h knowledge-hit counter) that visualizes active IDE tasks, exact
+    local `Memo` / `Claim` / `Solution` items retrieved by each session, click-to-inspect
+    full knowledge content (`When` / `Rule` / `Trap` / `Verification`, evidence excerpts,
+    and anchored source files), and one-click HTML portal / offline `dream-pass` actions
+    without resetting the Host idle timer:
     ```sh
     llr menubar-start --install-login-agent --approve
     llr menubar-status
