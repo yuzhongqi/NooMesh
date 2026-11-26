@@ -242,71 +242,161 @@ final class DashboardViewModel: ObservableObject {
     }
 }
 
-// MARK: - Apple HIG Design Tokens & Surfaces
+// MARK: - Liquid Glass Optical Tokens & Modifiers
 
-enum HIGPalette {
+enum GlassPalette {
     static let primaryLabel = Color(nsColor: .labelColor)
     static let secondaryLabel = Color(nsColor: .secondaryLabelColor)
     static let tertiaryLabel = Color(nsColor: .tertiaryLabelColor)
     static let onlineDot = Color(nsColor: .systemGreen)
     static let standbyDot = Color(nsColor: .tertiaryLabelColor)
 
-    static func platterFill(_ scheme: ColorScheme, emphasized: Bool = false) -> Color {
+    static func bodyGradient(_ scheme: ColorScheme, emphasized: Bool = false) -> LinearGradient {
         if scheme == .dark {
-            return Color.white.opacity(emphasized ? 0.11 : 0.075)
+            return LinearGradient(
+                colors: [
+                    Color.white.opacity(emphasized ? 0.16 : 0.105),
+                    Color.white.opacity(emphasized ? 0.075 : 0.042)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         } else {
-            return Color.white.opacity(emphasized ? 0.86 : 0.68)
+            return LinearGradient(
+                colors: [
+                    Color.white.opacity(emphasized ? 0.68 : 0.50),
+                    Color.white.opacity(emphasized ? 0.42 : 0.26)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         }
     }
 
-    static func platterStroke(_ scheme: ColorScheme, active: Bool = false) -> Color {
-        if active {
-            return scheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.14)
+    static func specularRimGradient(_ scheme: ColorScheme, active: Bool = false) -> LinearGradient {
+        if scheme == .dark {
+            return LinearGradient(
+                stops: [
+                    .init(color: Color.white.opacity(active ? 0.42 : 0.26), location: 0.0),
+                    .init(color: Color.white.opacity(0.04), location: 0.48),
+                    .init(color: Color.white.opacity(active ? 0.22 : 0.12), location: 1.0)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        } else {
+            return LinearGradient(
+                stops: [
+                    .init(color: Color.white.opacity(active ? 0.95 : 0.82), location: 0.0),
+                    .init(color: Color.white.opacity(0.20), location: 0.48),
+                    .init(color: Color.white.opacity(active ? 0.62 : 0.46), location: 1.0)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         }
-        return scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.06)
     }
 
-    static func recessedFill(_ scheme: ColorScheme) -> Color {
-        return scheme == .dark ? Color.black.opacity(0.24) : Color.black.opacity(0.055)
+    static func recessedChannelFill(_ scheme: ColorScheme) -> Color {
+        return scheme == .dark ? Color.black.opacity(0.26) : Color.black.opacity(0.055)
     }
 
-    static func chipFill(_ scheme: ColorScheme) -> Color {
-        return scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.055)
+    static func microCapsuleFill(_ scheme: ColorScheme) -> Color {
+        return scheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.52)
     }
 }
 
-struct ApplePlatterModifier: ViewModifier {
+struct LiquidDropletModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
-    var cornerRadius: CGFloat = 11
+    @State private var hoverLocation: CGPoint? = nil
+
+    var cornerRadius: CGFloat = 15
     var emphasized: Bool = false
-    var activeBorder: Bool = false
+    var activeRim: Bool = false
+    var interactiveHover: Bool = true
 
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(HIGPalette.platterFill(colorScheme, emphasized: emphasized))
-                    .shadow(
-                        color: colorScheme == .dark ? .clear : Color.black.opacity(0.035),
-                        radius: 2, x: 0, y: 1
+                ZStack {
+                    // 1. Translucent refractive droplet body
+                    shape.fill(GlassPalette.bodyGradient(colorScheme, emphasized: emphasized))
+
+                    // 2. Top-edge convex liquid meniscus sheen
+                    LinearGradient(
+                        stops: [
+                            .init(color: Color.white.opacity(colorScheme == .dark ? 0.16 : 0.55), location: 0.0),
+                            .init(color: Color.clear, location: 0.42)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
+                    .clipShape(shape)
+
+                    // 3. Interactive cursor-tracking liquid caustic highlight
+                    if let pt = hoverLocation {
+                        RadialGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.16 : 0.44),
+                                Color.clear
+                            ],
+                            center: .topLeading,
+                            startRadius: 2,
+                            endRadius: 120
+                        )
+                        .offset(x: pt.x - 16, y: pt.y - 16)
+                        .clipShape(shape)
+                    }
+                }
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.24 : 0.065),
+                    radius: emphasized ? 8 : 5,
+                    x: 0,
+                    y: emphasized ? 4 : 2
+                )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(HIGPalette.platterStroke(colorScheme, active: activeBorder), lineWidth: 0.5)
+                // 4. Diagonal dual-catchlight optical glass rim
+                shape.strokeBorder(
+                    GlassPalette.specularRimGradient(colorScheme, active: activeRim),
+                    lineWidth: activeRim ? 1.0 : 0.8
+                )
             )
+            .onContinuousHover { phase in
+                guard interactiveHover else { return }
+                switch phase {
+                case .active(let loc):
+                    hoverLocation = loc
+                case .ended:
+                    hoverLocation = nil
+                }
+            }
     }
 }
 
 extension View {
-    func applePlatter(cornerRadius: CGFloat = 11, emphasized: Bool = false, activeBorder: Bool = false) -> some View {
-        modifier(ApplePlatterModifier(cornerRadius: cornerRadius, emphasized: emphasized, activeBorder: activeBorder))
+    func liquidDroplet(
+        cornerRadius: CGFloat = 15,
+        emphasized: Bool = false,
+        activeRim: Bool = false,
+        interactiveHover: Bool = true
+    ) -> some View {
+        modifier(
+            LiquidDropletModifier(
+                cornerRadius: cornerRadius,
+                emphasized: emphasized,
+                activeRim: activeRim,
+                interactiveHover: interactiveHover
+            )
+        )
     }
 }
 
-// MARK: - Native Control-Center Style Views
+// MARK: - Liquid Glass Views
 
 struct ServiceStatusItem: View {
+    @Environment(\.colorScheme) private var colorScheme
     let symbol: String?
     let dotColor: Color?
     let label: String
@@ -317,15 +407,26 @@ struct ServiceStatusItem: View {
                 Circle()
                     .fill(dot)
                     .frame(width: 6, height: 6)
+                    .shadow(color: dot.opacity(0.55), radius: 3, x: 0, y: 0)
             } else if let sym = symbol {
                 Image(systemName: sym)
                     .font(.system(size: 9.5, weight: .medium))
-                    .foregroundColor(HIGPalette.secondaryLabel)
+                    .foregroundColor(GlassPalette.secondaryLabel)
             }
             Text(label)
                 .font(.system(size: 10.5, weight: .regular))
-                .foregroundColor(HIGPalette.secondaryLabel)
+                .foregroundColor(GlassPalette.secondaryLabel)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3.5)
+        .background(
+            Capsule()
+                .fill(GlassPalette.microCapsuleFill(colorScheme))
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.65)
+        )
     }
 }
 
@@ -338,66 +439,90 @@ struct MetricCard: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundColor(HIGPalette.secondaryLabel)
+                .foregroundColor(GlassPalette.secondaryLabel)
                 .lineLimit(1)
             Text(value)
-                .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundColor(HIGPalette.primaryLabel)
+                .font(.system(size: 18.5, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundColor(GlassPalette.primaryLabel)
             Text(subtitle)
                 .font(.system(size: 9.5))
-                .foregroundColor(HIGPalette.tertiaryLabel)
+                .foregroundColor(GlassPalette.tertiaryLabel)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .applePlatter(cornerRadius: 10)
+        .padding(.vertical, 8.5)
+        .liquidDroplet(cornerRadius: 14)
     }
 }
 
-struct ControlCenterSegmentedBar: View {
+struct LiquidSegmentedBar: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Namespace private var tabNamespace
     @Binding var selection: Int
     let leftTitle: String
     let rightTitle: String
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
             segmentButton(index: 0, title: leftTitle)
             segmentButton(index: 1, title: rightTitle)
         }
-        .padding(3)
+        .padding(3.5)
         .background(
-            RoundedRectangle(cornerRadius: 8.5, style: .continuous)
-                .fill(HIGPalette.recessedFill(colorScheme))
+            Capsule()
+                .fill(GlassPalette.recessedChannelFill(colorScheme))
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(
+                    Color.white.opacity(colorScheme == .dark ? 0.10 : 0.42),
+                    lineWidth: 0.6
+                )
         )
     }
 
     private func segmentButton(index: Int, title: String) -> some View {
         let isSelected = selection == index
         return Button(action: {
-            withAnimation(.easeInOut(duration: 0.14)) {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) {
                 selection = index
             }
         }) {
             Text(title)
                 .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
-                .foregroundColor(isSelected ? HIGPalette.primaryLabel : HIGPalette.secondaryLabel)
+                .foregroundColor(isSelected ? GlassPalette.primaryLabel : GlassPalette.secondaryLabel)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 4.5)
+                .padding(.vertical, 5.5)
                 .background(
-                    Group {
+                    ZStack {
                         if isSelected {
-                            RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.15) : Color.white.opacity(0.95))
-                                .shadow(
-                                    color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.07),
-                                    radius: 1.5, x: 0, y: 0.5
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: colorScheme == .dark
+                                            ? [Color.white.opacity(0.22), Color.white.opacity(0.11)]
+                                            : [Color.white.opacity(0.88), Color.white.opacity(0.62)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
                                 )
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(
+                                            GlassPalette.specularRimGradient(colorScheme, active: true),
+                                            lineWidth: 0.85
+                                        )
+                                )
+                                .shadow(
+                                    color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.08),
+                                    radius: 4, x: 0, y: 1.5
+                                )
+                                .matchedGeometryEffect(id: "activeLiquidPill", in: tabNamespace)
                         }
                     }
                 )
-                .contentShape(Rectangle())
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -425,12 +550,16 @@ struct KnowledgeKindTag: View {
             Text(meta.1)
                 .font(.system(size: 9.5, weight: .medium))
         }
-        .foregroundColor(HIGPalette.secondaryLabel)
-        .padding(.horizontal, 5.5)
+        .foregroundColor(GlassPalette.secondaryLabel)
+        .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(
-            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                .fill(HIGPalette.chipFill(colorScheme))
+            Capsule()
+                .fill(GlassPalette.microCapsuleFill(colorScheme))
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.55)
         )
     }
 }
@@ -446,35 +575,36 @@ struct SessionCardView: View {
             HStack(spacing: 6) {
                 HStack(spacing: 4.5) {
                     Circle()
-                        .fill(isRunning ? HIGPalette.onlineDot : HIGPalette.standbyDot)
+                        .fill(isRunning ? GlassPalette.onlineDot : GlassPalette.standbyDot)
                         .frame(width: 6, height: 6)
+                        .shadow(color: isRunning ? GlassPalette.onlineDot.opacity(0.6) : .clear, radius: 3)
                     Text(isRunning ? "执行中" : "待命")
                         .font(.system(size: 10.5, weight: isRunning ? .semibold : .medium))
-                        .foregroundColor(isRunning ? HIGPalette.primaryLabel : HIGPalette.secondaryLabel)
+                        .foregroundColor(isRunning ? GlassPalette.primaryLabel : GlassPalette.secondaryLabel)
                 }
 
                 Text("·")
-                    .foregroundColor(HIGPalette.tertiaryLabel)
+                    .foregroundColor(GlassPalette.tertiaryLabel)
 
                 Text("\(item.client) \(item.session_short)")
                     .font(.system(size: 10.5, weight: .regular, design: .monospaced))
-                    .foregroundColor(HIGPalette.secondaryLabel)
+                    .foregroundColor(GlassPalette.secondaryLabel)
 
                 Text(item.workspace)
                     .font(.system(size: 10.5))
-                    .foregroundColor(HIGPalette.tertiaryLabel)
+                    .foregroundColor(GlassPalette.tertiaryLabel)
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(item.updated_ago)
                     .font(.system(size: 10))
-                    .foregroundColor(HIGPalette.tertiaryLabel)
+                    .foregroundColor(GlassPalette.tertiaryLabel)
             }
 
             Text(item.title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(HIGPalette.primaryLabel)
+                .foregroundColor(GlassPalette.primaryLabel)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -482,48 +612,49 @@ struct SessionCardView: View {
                 HStack(spacing: 4.5) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 9.5))
-                        .foregroundColor(HIGPalette.tertiaryLabel)
+                        .foregroundColor(GlassPalette.tertiaryLabel)
                     Text(item.last_query)
                         .font(.system(size: 10.5))
-                        .foregroundColor(HIGPalette.secondaryLabel)
+                        .foregroundColor(GlassPalette.secondaryLabel)
                         .lineLimit(1)
                 }
             }
 
             if !item.knowledge_used.isEmpty {
-                Divider()
-                    .opacity(colorScheme == .dark ? 0.35 : 0.5)
+                Rectangle()
+                    .fill(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.45))
+                    .frame(height: 0.6)
                 VStack(alignment: .leading, spacing: 4.5) {
                     HStack(spacing: 4.5) {
                         Image(systemName: "sparkles")
                             .font(.system(size: 9.5, weight: .medium))
-                            .foregroundColor(HIGPalette.secondaryLabel)
+                            .foregroundColor(GlassPalette.secondaryLabel)
                         Text("已调用本地知识 (\(item.knowledge_used.count))")
                             .font(.system(size: 10.5, weight: .medium))
-                            .foregroundColor(HIGPalette.secondaryLabel)
+                            .foregroundColor(GlassPalette.secondaryLabel)
                     }
                     ForEach(item.knowledge_used) { k in
                         HStack(spacing: 6) {
                             KnowledgeKindTag(kind: k.kind)
                             Text(k.title)
                                 .font(.system(size: 11))
-                                .foregroundColor(HIGPalette.primaryLabel)
+                                .foregroundColor(GlassPalette.primaryLabel)
                                 .lineLimit(1)
                             Spacer(minLength: 4)
                             Text(k.time_ago)
                                 .font(.system(size: 10))
-                                .foregroundColor(HIGPalette.tertiaryLabel)
+                                .foregroundColor(GlassPalette.tertiaryLabel)
                         }
                     }
                 }
             } else {
                 Text("本会话暂未触发本地知识检索")
                     .font(.system(size: 10.5))
-                    .foregroundColor(HIGPalette.tertiaryLabel)
+                    .foregroundColor(GlassPalette.tertiaryLabel)
             }
         }
-        .padding(11)
-        .applePlatter(cornerRadius: 11, emphasized: isRunning, activeBorder: isRunning)
+        .padding(11.5)
+        .liquidDroplet(cornerRadius: 16, emphasized: isRunning, activeRim: isRunning)
     }
 }
 
@@ -541,47 +672,49 @@ struct ActivityRowView: View {
                     Text(item.action)
                         .font(.system(size: 10.5, weight: .medium))
                 }
-                .foregroundColor(HIGPalette.secondaryLabel)
+                .foregroundColor(GlassPalette.secondaryLabel)
 
                 KnowledgeKindTag(kind: item.kind)
 
                 Text(item.workspace)
                     .font(.system(size: 10.5))
-                    .foregroundColor(HIGPalette.tertiaryLabel)
+                    .foregroundColor(GlassPalette.tertiaryLabel)
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(item.time_ago)
                     .font(.system(size: 10))
-                    .foregroundColor(HIGPalette.tertiaryLabel)
+                    .foregroundColor(GlassPalette.tertiaryLabel)
             }
 
             Text(item.title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(HIGPalette.primaryLabel)
+                .foregroundColor(GlassPalette.primaryLabel)
                 .lineLimit(2)
 
             if !item.task_title.isEmpty {
                 HStack(spacing: 4) {
                     Text(item.session_short)
                         .font(.system(size: 10, weight: .regular, design: .monospaced))
-                        .foregroundColor(HIGPalette.tertiaryLabel)
+                        .foregroundColor(GlassPalette.tertiaryLabel)
                     Text("·")
-                        .foregroundColor(HIGPalette.tertiaryLabel)
+                        .foregroundColor(GlassPalette.tertiaryLabel)
                     Text(item.task_title)
                         .font(.system(size: 10.5))
-                        .foregroundColor(HIGPalette.secondaryLabel)
+                        .foregroundColor(GlassPalette.secondaryLabel)
                         .lineLimit(1)
                 }
             }
         }
-        .padding(10.5)
-        .applePlatter(cornerRadius: 10)
+        .padding(11)
+        .liquidDroplet(cornerRadius: 15)
     }
 }
 
-struct FooterActionPill: View {
+struct LiquidCapsuleButton: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
     let title: String
     let systemImage: String
     let disabled: Bool
@@ -589,20 +722,39 @@ struct FooterActionPill: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4.5) {
+            HStack(spacing: 5) {
                 Image(systemName: systemImage)
                     .font(.system(size: 10.5, weight: .medium))
                 Text(title)
                     .font(.system(size: 11, weight: .medium))
             }
-            .foregroundColor(HIGPalette.primaryLabel)
-            .padding(.horizontal, 9.5)
-            .padding(.vertical, 5)
-            .applePlatter(cornerRadius: 7.5)
+            .foregroundColor(GlassPalette.primaryLabel)
+            .padding(.horizontal, 11.5)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(GlassPalette.bodyGradient(colorScheme, emphasized: isHovering))
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.24 : 0.06),
+                        radius: isHovering ? 6 : 3, x: 0, y: 1.5
+                    )
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        GlassPalette.specularRimGradient(colorScheme, active: isHovering),
+                        lineWidth: 0.8
+                    )
+            )
+            .scaleEffect(isHovering ? 1.02 : 1.0)
+            .animation(.easeOut(duration: 0.14), value: isHovering)
         }
         .buttonStyle(.plain)
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1.0)
+        .onHover { hovering in
+            isHovering = hovering
+        }
     }
 }
 
@@ -615,14 +767,14 @@ struct DashboardPopoverView: View {
             headerSection
             if let snap = vm.snapshot {
                 metricsSection(snap)
-                ControlCenterSegmentedBar(
+                LiquidSegmentedBar(
                     selection: $vm.selectedTab,
                     leftTitle: "当前会话任务 (\(snap.live_sessions.count))",
                     rightTitle: "知识调用与学习 (\(snap.recent_activity.count))"
                 )
 
                 ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 8.5) {
                         if vm.selectedTab == 0 {
                             if snap.live_sessions.isEmpty {
                                 emptyState(
@@ -649,7 +801,7 @@ struct DashboardPopoverView: View {
                             }
                         }
                     }
-                    .padding(.vertical, 1)
+                    .padding(.vertical, 2)
                 }
             } else {
                 Spacer()
@@ -660,42 +812,58 @@ struct DashboardPopoverView: View {
 
             footerSection
         }
-        .padding(14)
-        .frame(width: 410, height: 545)
+        .padding(15)
+        .frame(width: 420, height: 556)
+        .background(Color.clear)
     }
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 10.5) {
                 ZStack {
                     Circle()
-                        .fill(HIGPalette.chipFill(colorScheme))
-                        .frame(width: 32, height: 32)
+                        .fill(GlassPalette.bodyGradient(colorScheme, emphasized: true))
+                        .frame(width: 34, height: 34)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(
+                                    GlassPalette.specularRimGradient(colorScheme, active: true),
+                                    lineWidth: 0.85
+                                )
+                        )
+                        .shadow(
+                            color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.07),
+                            radius: 4, x: 0, y: 2
+                        )
                     Image(systemName: "brain.head.profile")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(HIGPalette.primaryLabel)
+                        .font(.system(size: 15.5, weight: .medium))
+                        .foregroundColor(GlassPalette.primaryLabel)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text("Clone Yourself")
-                            .font(.system(size: 13.5, weight: .semibold))
-                            .foregroundColor(HIGPalette.primaryLabel)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(GlassPalette.primaryLabel)
                         if let ws = vm.snapshot?.primary_workspace {
                             Text(ws)
                                 .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(HIGPalette.secondaryLabel)
-                                .padding(.horizontal, 6.5)
-                                .padding(.vertical, 1.5)
+                                .foregroundColor(GlassPalette.secondaryLabel)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
                                 .background(
                                     Capsule()
-                                        .fill(HIGPalette.chipFill(colorScheme))
+                                        .fill(GlassPalette.microCapsuleFill(colorScheme))
+                                )
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.55)
                                 )
                         }
                     }
                     Text(vm.snapshot.map { "最近命中 \($0.last_hit_ago) · \($0.machine_name)" } ?? "本地经验运行时")
                         .font(.system(size: 10.5))
-                        .foregroundColor(HIGPalette.secondaryLabel)
+                        .foregroundColor(GlassPalette.secondaryLabel)
                         .lineLimit(1)
                 }
 
@@ -703,10 +871,10 @@ struct DashboardPopoverView: View {
             }
 
             if let host = vm.snapshot?.host {
-                HStack(spacing: 12) {
+                HStack(spacing: 6) {
                     ServiceStatusItem(
                         symbol: nil,
-                        dotColor: host.online ? HIGPalette.onlineDot : HIGPalette.standbyDot,
+                        dotColor: host.online ? GlassPalette.onlineDot : GlassPalette.standbyDot,
                         label: host.online ? "Host 在线" : "Host 按需休眠"
                     )
                     if host.teams_away_only || host.teams_inbox {
@@ -725,13 +893,12 @@ struct DashboardPopoverView: View {
                     }
                     Spacer()
                 }
-                .padding(.leading, 2)
             }
         }
     }
 
     private func metricsSection(_ snap: MenuBarSnapshot) -> some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 7.5) {
             MetricCard(
                 title: "24h 知识命中",
                 value: "\(snap.totals.today_hits)",
@@ -759,13 +926,13 @@ struct DashboardPopoverView: View {
         VStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 24, weight: .light))
-                .foregroundColor(HIGPalette.tertiaryLabel)
+                .foregroundColor(GlassPalette.tertiaryLabel)
             Text(title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(HIGPalette.primaryLabel)
+                .foregroundColor(GlassPalette.primaryLabel)
             Text(subtitle)
                 .font(.system(size: 11))
-                .foregroundColor(HIGPalette.secondaryLabel)
+                .foregroundColor(GlassPalette.secondaryLabel)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
         }
@@ -778,19 +945,20 @@ struct DashboardPopoverView: View {
             if !vm.toastMessage.isEmpty {
                 Text(vm.toastMessage)
                     .font(.system(size: 10.5, weight: .medium))
-                    .foregroundColor(HIGPalette.secondaryLabel)
+                    .foregroundColor(GlassPalette.secondaryLabel)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider()
-                .opacity(colorScheme == .dark ? 0.35 : 0.5)
-            HStack(spacing: 7) {
-                FooterActionPill(
+            Rectangle()
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.45))
+                .frame(height: 0.6)
+            HStack(spacing: 7.5) {
+                LiquidCapsuleButton(
                     title: "知识门户",
                     systemImage: "safari",
                     disabled: vm.isBusyAction,
                     action: { vm.openPortal() }
                 )
-                FooterActionPill(
+                LiquidCapsuleButton(
                     title: "巡检整理",
                     systemImage: "arrow.triangle.2.circlepath",
                     disabled: vm.isBusyAction,
@@ -802,18 +970,34 @@ struct DashboardPopoverView: View {
                 Button(action: { vm.refreshNow() }) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(HIGPalette.secondaryLabel)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
+                        .foregroundColor(GlassPalette.secondaryLabel)
+                        .frame(width: 26, height: 26)
+                        .background(
+                            Circle()
+                                .fill(GlassPalette.microCapsuleFill(colorScheme))
+                        )
+                        .overlay(
+                            Circle()
+                                .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.55)
+                        )
                 }
                 .buttonStyle(.plain)
                 .help("刷新状态")
 
                 Button(action: { NSApplication.shared.terminate(nil) }) {
                     Text("退出")
-                        .font(.system(size: 11))
-                        .foregroundColor(HIGPalette.secondaryLabel)
-                        .padding(.horizontal, 4)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(GlassPalette.secondaryLabel)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(GlassPalette.microCapsuleFill(colorScheme))
+                        )
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.55)
+                        )
                 }
                 .buttonStyle(.plain)
             }
@@ -821,13 +1005,21 @@ struct DashboardPopoverView: View {
     }
 }
 
-// MARK: - AppKit Status Bar Controller
+// MARK: - Floating Liquid Glass Panel & AppKit Status Bar Controller
+
+final class FloatingGlassPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    private let panelSize = NSSize(width: 420, height: 556)
     private var statusItem: NSStatusItem!
-    private let popover = NSPopover()
+    private var panel: FloatingGlassPanel!
     private var viewModel: DashboardViewModel!
+    private var globalClickMonitor: Any?
+    private var localKeyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let cli = RuntimeCLI.parseFromCommandLine()
@@ -845,20 +1037,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             button.imagePosition = .imageLeading
             button.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
             button.target = self
-            button.action = #selector(togglePopover(_:))
+            button.action = #selector(togglePanel(_:))
             button.toolTip = "Clone Yourself · 本地知识实时状态"
         }
 
-        popover.contentSize = NSSize(width: 410, height: 545)
-        popover.behavior = .transient
-        popover.animates = true
-        popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: DashboardPopoverView(vm: viewModel))
+        buildFloatingGlassPanel()
 
         viewModel.onStatusBarChange = { [weak self] snap in
             self?.updateStatusButton(snap)
         }
         viewModel.startPolling()
+    }
+
+    private func buildFloatingGlassPanel() {
+        let rect = NSRect(origin: .zero, size: panelSize)
+        panel = FloatingGlassPanel(
+            contentRect: rect,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .popUpMenu
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        panel.isMovableByWindowBackground = false
+        panel.delegate = self
+
+        let hostingView = NSHostingView(rootView: DashboardPopoverView(vm: viewModel))
+        hostingView.frame = rect
+        hostingView.autoresizingMask = [.width, .height]
+
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            let glassRoot = NSGlassEffectView(frame: rect)
+            glassRoot.cornerRadius = 26
+            glassRoot.style = .regular
+            glassRoot.autoresizingMask = [.width, .height]
+            glassRoot.contentView = hostingView
+            panel.contentView = glassRoot
+            return
+        }
+        #endif
+
+        let fallbackBlur = NSVisualEffectView(frame: rect)
+        fallbackBlur.material = .hudWindow
+        fallbackBlur.blendingMode = .behindWindow
+        fallbackBlur.state = .active
+        fallbackBlur.wantsLayer = true
+        fallbackBlur.layer?.cornerRadius = 26
+        fallbackBlur.layer?.cornerCurve = .continuous
+        fallbackBlur.layer?.masksToBounds = true
+        fallbackBlur.addSubview(hostingView)
+        panel.contentView = fallbackBlur
     }
 
     private func updateStatusButton(_ snap: MenuBarSnapshot?) {
@@ -875,21 +1107,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         button.toolTip = "Clone Yourself · 24h 命中本地知识 \(hits) 次 · \(active) 个会话执行中 · 最近命中: \(snap.last_hit_ago)"
     }
 
-    @objc private func togglePopover(_ sender: AnyObject?) {
-        guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(sender)
-            viewModel.setPopoverVisible(false)
+    @objc private func togglePanel(_ sender: AnyObject?) {
+        if panel.isVisible {
+            closePanel()
         } else {
-            NSApplication.shared.activate(ignoringOtherApps: true)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
-            viewModel.setPopoverVisible(true)
+            showPanel()
         }
     }
 
-    func popoverDidClose(_ notification: Notification) {
+    private func showPanel() {
+        guard let button = statusItem.button, let btnWindow = button.window else { return }
+        let btnRectInWindow = button.convert(button.bounds, to: nil)
+        let btnScreenRect = btnWindow.convertToScreen(btnRectInWindow)
+        let screenFrame = (btnWindow.screen ?? NSScreen.main)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+
+        var originX = round(btnScreenRect.midX - panelSize.width / 2.0)
+        originX = max(screenFrame.minX + 8, min(originX, screenFrame.maxX - panelSize.width - 8))
+        let originY = btnScreenRect.minY - panelSize.height - 6
+
+        panel.setFrameOrigin(NSPoint(x: originX, y: originY))
+        panel.alphaValue = 0.0
+        button.highlight(true)
+        panel.makeKeyAndOrderFront(nil)
+        viewModel.setPopoverVisible(true)
+        installDismissMonitors()
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.16
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1.0
+        }
+    }
+
+    private func closePanel() {
+        guard panel.isVisible else { return }
+        removeDismissMonitors()
+        statusItem.button?.highlight(false)
         viewModel.setPopoverVisible(false)
+        panel.orderOut(nil)
+    }
+
+    private func installDismissMonitors() {
+        removeDismissMonitors()
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.panel.isVisible else { return }
+                let mouseLoc = NSEvent.mouseLocation
+                if let btnFrame = self.statusItem.button?.window?.frame, btnFrame.contains(mouseLoc) {
+                    return
+                }
+                if !self.panel.frame.contains(mouseLoc) {
+                    self.closePanel()
+                }
+            }
+        }
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 { // Escape
+                Task { @MainActor [weak self] in
+                    self?.closePanel()
+                }
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeDismissMonitors() {
+        if let monitor = globalClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalClickMonitor = nil
+        }
+        if let monitor = localKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            localKeyMonitor = nil
+        }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        closePanel()
     }
 }
 
