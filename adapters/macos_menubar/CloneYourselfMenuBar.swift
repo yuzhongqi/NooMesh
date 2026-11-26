@@ -128,6 +128,64 @@ struct SelectedKnowledgeRef: Equatable {
     }
 }
 
+struct HitsByKind: Decodable {
+    let memo: Int
+    let claim: Int
+    let solution: Int
+}
+
+struct HitsChannelStat: Decodable, Identifiable {
+    var id: String { key }
+    let key: String
+    let label: String
+    let count: Int
+}
+
+struct HitsTopItem: Decodable, Identifiable {
+    var id: String { "\(kind):\(workspace):\(subject)" }
+    let kind: String
+    let badge: String
+    let subject: String
+    let workspace: String
+    let title: String
+    let hit_count: Int
+    let sessions_count: Int
+    let last_hit_ago: String
+}
+
+struct HitsEventItem: Decodable, Identifiable {
+    let id: String
+    let kind: String
+    let badge: String
+    let subject: String
+    let workspace: String
+    let title: String
+    let version: Int
+    let channel_key: String
+    let channel_label: String
+    let session_short: String
+    let task_title: String
+    let query: String
+    let local_time: String
+    let time_ago: String
+    let occurred_at: String
+}
+
+struct HitsBreakdownReport: Decodable {
+    let schema: String
+    let window_hours: Int
+    let window_hits: Int
+    let total_hits: Int
+    let distinct_items: Int
+    let distinct_sessions: Int
+    let by_kind: HitsByKind
+    let channels: [HitsChannelStat]
+    let top_items: [HitsTopItem]
+    let events: [HitsEventItem]
+    let recent_fallback_events: [HitsEventItem]
+    let copy_markdown: String
+}
+
 // MARK: - CLI Configuration
 
 struct RuntimeCLI {
@@ -194,6 +252,11 @@ final class DashboardViewModel: ObservableObject {
     @Published var selectedDetail: KnowledgeItemDetail? = nil
     @Published var isLoadingDetail: Bool = false
     @Published var detailError: String? = nil
+    @Published var showHitsBreakdown: Bool = false
+    @Published var hitsSubTab: Int = 0
+    @Published var hitsReport: HitsBreakdownReport? = nil
+    @Published var isLoadingHits: Bool = false
+    @Published var hitsError: String? = nil
 
     let cli: RuntimeCLI
     var onStatusBarChange: ((MenuBarSnapshot?) -> Void)?
@@ -237,6 +300,7 @@ final class DashboardViewModel: ObservableObject {
         guard !fetchInFlight else { return }
         fetchInFlight = true
         let localCLI = cli
+        let needHits = showHitsBreakdown
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let data = localCLI.executeJSON(["menubar-snapshot"])
             let decoded: MenuBarSnapshot?
@@ -245,12 +309,19 @@ final class DashboardViewModel: ObservableObject {
             } else {
                 decoded = nil
             }
+            var refreshedHits: HitsBreakdownReport? = nil
+            if needHits, let hData = localCLI.executeJSON(["menubar-hits", "--hours", "24"]) {
+                refreshedHits = try? JSONDecoder().decode(HitsBreakdownReport.self, from: hData)
+            }
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.fetchInFlight = false
                 if let decoded = decoded {
                     self.snapshot = decoded
                     self.onStatusBarChange?(decoded)
+                }
+                if let refreshedHits = refreshedHits {
+                    self.hitsReport = refreshedHits
                 }
             }
         }
@@ -346,10 +417,57 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
+    func openHitsBreakdown() {
+        hitsError = nil
+        if hitsReport == nil {
+            isLoadingHits = true
+        }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+            showHitsBreakdown = true
+        }
+        let localCLI = cli
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = localCLI.executeJSON(["menubar-hits", "--hours", "24"])
+            let decoded: HitsBreakdownReport?
+            if let data = data {
+                decoded = try? JSONDecoder().decode(HitsBreakdownReport.self, from: data)
+            } else {
+                decoded = nil
+            }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isLoadingHits = false
+                if let decoded = decoded {
+                    self.hitsReport = decoded
+                } else if self.hitsReport == nil {
+                    self.hitsError = "未能读取近 24 小时命中明细"
+                }
+            }
+        }
+    }
+
+    func closeHitsBreakdown() {
+        guard showHitsBreakdown else { return }
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+            showHitsBreakdown = false
+        }
+    }
+
+    func copyHitsReportMarkdown() {
+        guard let md = hitsReport?.copy_markdown, !md.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(md, forType: .string)
+        showTemporaryToast("已复制 24h 知识命中报告到剪贴板")
+    }
+
     func resetDetailWithoutAnimation() {
         selectedRef = nil
         detailError = nil
         isLoadingDetail = false
+        showHitsBreakdown = false
+        hitsError = nil
+        isLoadingHits = false
     }
 
     func copySelectedDetailMarkdown() {
@@ -569,16 +687,26 @@ struct ServiceStatusItem: View {
 }
 
 struct MetricCard: View {
+    @State private var isHovering = false
     let title: String
     let value: String
     let subtitle: String
+    var action: (() -> Void)? = nil
 
-    var body: some View {
+    private var cardContent: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundColor(GlassPalette.secondaryLabel)
-                .lineLimit(1)
+            HStack(spacing: 3) {
+                Text(title)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                    .lineLimit(1)
+                if action != nil {
+                    Spacer(minLength: 2)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundColor(isHovering ? GlassPalette.primaryLabel : GlassPalette.tertiaryLabel)
+                }
+            }
             Text(value)
                 .font(.system(size: 18.5, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundColor(GlassPalette.primaryLabel)
@@ -590,7 +718,29 @@ struct MetricCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 8.5)
-        .liquidDroplet(cornerRadius: 14)
+        .liquidDroplet(
+            cornerRadius: 14,
+            emphasized: action != nil && isHovering,
+            activeRim: action != nil && isHovering
+        )
+        .scaleEffect(action != nil && isHovering ? 1.02 : 1.0)
+        .animation(.easeOut(duration: 0.14), value: isHovering)
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    var body: some View {
+        if let action = action {
+            Button(action: action) {
+                cardContent
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                isHovering = hovering
+            }
+            .help("点击查看近 24 小时知识命中统计与逐条明细")
+        } else {
+            cardContent
+        }
     }
 }
 
@@ -929,7 +1079,7 @@ struct KnowledgeDetailView: View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
                 LiquidCapsuleButton(
-                    title: "返回列表",
+                    title: vm.showHitsBreakdown ? "返回 24h 明细" : "返回列表",
                     systemImage: "chevron.left",
                     disabled: false,
                     action: { vm.closeKnowledgeDetail() }
@@ -1209,6 +1359,361 @@ struct LiquidCapsuleButton: View {
     }
 }
 
+struct HitsEventRowButton: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+    let item: HitsEventItem
+    let onSelect: (String, String, String?, String) -> Void
+
+    var body: some View {
+        Button(action: {
+            onSelect(item.kind, item.subject, item.workspace, item.title)
+        }) {
+            VStack(alignment: .leading, spacing: 5.5) {
+                HStack(spacing: 5.5) {
+                    Text(item.local_time)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(GlassPalette.secondaryLabel)
+
+                    Text("(\(item.time_ago))")
+                        .font(.system(size: 9.5))
+                        .foregroundColor(GlassPalette.tertiaryLabel)
+
+                    Text(item.channel_label)
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundColor(GlassPalette.secondaryLabel)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            Capsule()
+                                .fill(GlassPalette.microCapsuleFill(colorScheme))
+                        )
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.5)
+                        )
+
+                    KnowledgeKindTag(kind: item.kind)
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(isHovering ? GlassPalette.primaryLabel : GlassPalette.tertiaryLabel)
+                }
+
+                Text(item.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(GlassPalette.primaryLabel)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                if !item.query.isEmpty {
+                    HStack(spacing: 4.5) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 9))
+                            .foregroundColor(GlassPalette.tertiaryLabel)
+                        Text(item.query)
+                            .font(.system(size: 10.5))
+                            .foregroundColor(GlassPalette.secondaryLabel)
+                            .lineLimit(1)
+                    }
+                }
+
+                HStack(spacing: 4) {
+                    Text(item.session_short)
+                        .font(.system(size: 9.5, weight: .regular, design: .monospaced))
+                        .foregroundColor(GlassPalette.tertiaryLabel)
+                    if !item.task_title.isEmpty {
+                        Text("·")
+                            .foregroundColor(GlassPalette.tertiaryLabel)
+                        Text(item.task_title)
+                            .font(.system(size: 10))
+                            .foregroundColor(GlassPalette.secondaryLabel)
+                            .lineLimit(1)
+                    } else if !item.workspace.isEmpty {
+                        Text("·")
+                            .foregroundColor(GlassPalette.tertiaryLabel)
+                        Text(item.workspace)
+                            .font(.system(size: 10))
+                            .foregroundColor(GlassPalette.tertiaryLabel)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10.5)
+            .liquidDroplet(cornerRadius: 15, emphasized: isHovering, activeRim: isHovering)
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .help("点击查看该条本地知识的完整经验内容")
+    }
+}
+
+struct HitsTopItemRowButton: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+    let rank: Int
+    let item: HitsTopItem
+    let onSelect: (String, String, String?, String) -> Void
+
+    var body: some View {
+        Button(action: {
+            onSelect(item.kind, item.subject, item.workspace, item.title)
+        }) {
+            HStack(spacing: 9) {
+                Text("#\(rank)")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                    .frame(width: 24, height: 24)
+                    .background(
+                        Circle()
+                            .fill(GlassPalette.microCapsuleFill(colorScheme))
+                    )
+                    .overlay(
+                        Circle()
+                            .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.5)
+                    )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5.5) {
+                        KnowledgeKindTag(kind: item.kind)
+                        Text(item.workspace)
+                            .font(.system(size: 10))
+                            .foregroundColor(GlassPalette.tertiaryLabel)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("命中 \(item.hit_count) 次")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+                            .foregroundColor(GlassPalette.primaryLabel)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(GlassPalette.microCapsuleFill(colorScheme))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(GlassPalette.specularRimGradient(colorScheme, active: true), lineWidth: 0.55)
+                            )
+                    }
+
+                    Text(item.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(GlassPalette.primaryLabel)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    Text("赋能 \(item.sessions_count) 个会话 · 最近调用 \(item.last_hit_ago)")
+                        .font(.system(size: 10))
+                        .foregroundColor(GlassPalette.tertiaryLabel)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(isHovering ? GlassPalette.primaryLabel : GlassPalette.tertiaryLabel)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10.5)
+            .liquidDroplet(cornerRadius: 15, emphasized: isHovering, activeRim: isHovering)
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .help("点击查看该条高频知识的完整内容")
+    }
+}
+
+struct HitsBreakdownView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject var vm: DashboardViewModel
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                LiquidCapsuleButton(
+                    title: "返回概览",
+                    systemImage: "chevron.left",
+                    disabled: false,
+                    action: { vm.closeHitsBreakdown() }
+                )
+
+                Spacer()
+
+                if vm.hitsReport != nil {
+                    LiquidCapsuleButton(
+                        title: "复制报表",
+                        systemImage: "doc.on.doc",
+                        disabled: false,
+                        action: { vm.copyHitsReportMarkdown() }
+                    )
+                }
+            }
+
+            if let report = vm.hitsReport {
+                summaryHeroCard(report)
+
+                LiquidSegmentedBar(
+                    selection: $vm.hitsSubTab,
+                    leftTitle: "逐条命中明细 (\(report.events.count))",
+                    rightTitle: "高频经验排行 (\(report.top_items.count))"
+                )
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 8) {
+                        if vm.hitsSubTab == 0 {
+                            if report.events.isEmpty {
+                                VStack(spacing: 6) {
+                                    Text("近 24 小时暂无新命中记录")
+                                        .font(.system(size: 11.5, weight: .medium))
+                                        .foregroundColor(GlassPalette.secondaryLabel)
+                                    if !report.recent_fallback_events.isEmpty {
+                                        Text("以下为最近历史命中记录（点击可查看经验全文）")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(GlassPalette.tertiaryLabel)
+                                    }
+                                }
+                                .padding(.vertical, 8)
+
+                                ForEach(report.recent_fallback_events) { ev in
+                                    HitsEventRowButton(item: ev) { kind, subject, ws, title in
+                                        vm.openKnowledgeDetail(
+                                            kind: kind,
+                                            subject: subject,
+                                            workspace: ws,
+                                            fallbackTitle: title
+                                        )
+                                    }
+                                }
+                            } else {
+                                ForEach(report.events) { ev in
+                                    HitsEventRowButton(item: ev) { kind, subject, ws, title in
+                                        vm.openKnowledgeDetail(
+                                            kind: kind,
+                                            subject: subject,
+                                            workspace: ws,
+                                            fallbackTitle: title
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            if report.top_items.isEmpty {
+                                VStack(spacing: 6) {
+                                    Image(systemName: "chart.bar.xaxis")
+                                        .font(.system(size: 22, weight: .light))
+                                        .foregroundColor(GlassPalette.tertiaryLabel)
+                                    Text("近 24 小时暂无排行数据")
+                                        .font(.system(size: 11.5, weight: .medium))
+                                        .foregroundColor(GlassPalette.secondaryLabel)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 36)
+                            } else {
+                                ForEach(Array(report.top_items.enumerated()), id: \.element.id) { idx, topItem in
+                                    HitsTopItemRowButton(rank: idx + 1, item: topItem) { kind, subject, ws, title in
+                                        vm.openKnowledgeDetail(
+                                            kind: kind,
+                                            subject: subject,
+                                            workspace: ws,
+                                            fallbackTitle: title
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            } else if vm.isLoadingHits {
+                Spacer()
+                ProgressView("正在汇总近 24 小时知识命中明细…")
+                    .font(.system(size: 12))
+                Spacer()
+            } else {
+                Spacer()
+                Text(vm.hitsError ?? "未能加载命中明细")
+                    .font(.system(size: 12))
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                Spacer()
+            }
+        }
+    }
+
+    private func summaryHeroCard(_ report: HitsBreakdownReport) -> some View {
+        VStack(alignment: .leading, spacing: 7.5) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(report.window_hits)")
+                    .font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundColor(GlassPalette.primaryLabel)
+                Text("次近 24h 本地知识命中")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundColor(GlassPalette.primaryLabel)
+                Spacer()
+                Text("累计复用 \(report.total_hits) 次")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(GlassPalette.tertiaryLabel)
+            }
+
+            HStack(spacing: 6) {
+                statChip("涉及 \(report.distinct_items) 条经验")
+                statChip("赋能 \(report.distinct_sessions) 个会话")
+                if report.by_kind.memo > 0 {
+                    statChip("Memo ×\(report.by_kind.memo)")
+                }
+                if report.by_kind.claim > 0 {
+                    statChip("Claim ×\(report.by_kind.claim)")
+                }
+                if report.by_kind.solution > 0 {
+                    statChip("契约 ×\(report.by_kind.solution)")
+                }
+            }
+
+            if !report.channels.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5.5) {
+                        ForEach(report.channels) { ch in
+                            Text("\(ch.label) ×\(ch.count)")
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(GlassPalette.secondaryLabel)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(GlassPalette.recessedChannelFill(colorScheme))
+                                )
+                        }
+                    }
+                }
+            }
+        }
+        .padding(11.5)
+        .liquidDroplet(cornerRadius: 16, emphasized: true, activeRim: true, interactiveHover: false)
+    }
+
+    private func statChip(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(GlassPalette.secondaryLabel)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2.5)
+            .background(
+                Capsule()
+                    .fill(GlassPalette.microCapsuleFill(colorScheme))
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.5)
+            )
+    }
+}
+
 struct DashboardPopoverView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var vm: DashboardViewModel
@@ -1217,6 +1722,14 @@ struct DashboardPopoverView: View {
         VStack(spacing: 11) {
             if vm.isShowingDetail {
                 KnowledgeDetailView(vm: vm)
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        )
+                    )
+            } else if vm.showHitsBreakdown {
+                HitsBreakdownView(vm: vm)
                     .transition(
                         .asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -1383,7 +1896,8 @@ struct DashboardPopoverView: View {
             MetricCard(
                 title: "24h 知识命中",
                 value: "\(snap.totals.today_hits)",
-                subtitle: "累计 \(snap.totals.total_hits) 次"
+                subtitle: "累计 \(snap.totals.total_hits) 次",
+                action: { vm.openHitsBreakdown() }
             )
             MetricCard(
                 title: "避坑 Memo",
@@ -1652,6 +2166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     guard let self = self else { return }
                     if self.viewModel.isShowingDetail {
                         self.viewModel.closeKnowledgeDetail()
+                    } else if self.viewModel.showHitsBreakdown {
+                        self.viewModel.closeHitsBreakdown()
                     } else {
                         self.closePanel()
                     }

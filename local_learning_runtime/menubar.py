@@ -102,7 +102,7 @@ def _knowledge_title_catalog(store: Store) -> Dict[Tuple[str, str], Dict[str, st
             spec = body["spec"]
             title = spec.get("provenance", {}).get("title") or spec["statement"]
             lookup[("claim", row["id"])] = {
-                "title": str(title)[:96],
+                "title": str(title)[:240],
                 "workspace": spec["workspace"],
                 "lifecycle": body.get("lifecycle", "active"),
             }
@@ -112,7 +112,7 @@ def _knowledge_title_catalog(store: Store) -> Dict[Tuple[str, str], Dict[str, st
         try:
             spec = json.loads(row["body"])
             lookup[("memo", row["id"])] = {
-                "title": str(spec.get("title", row["id"]))[:96],
+                "title": str(spec.get("title", row["id"]))[:240],
                 "workspace": row["workspace"],
                 "lifecycle": row["lifecycle"],
                 "memo_kind": spec.get("kind", "rule"),
@@ -123,7 +123,7 @@ def _knowledge_title_catalog(store: Store) -> Dict[Tuple[str, str], Dict[str, st
         try:
             spec = json.loads(row["body"])
             lookup[("solution", row["id"])] = {
-                "title": str(spec.get("problem", {}).get("goal", row["id"]))[:96],
+                "title": str(spec.get("problem", {}).get("goal", row["id"]))[:240],
                 "workspace": row["workspace"],
                 "lifecycle": row["lifecycle"],
             }
@@ -240,7 +240,7 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             "kind": row["kind"],
             "subject": row["subject"],
             "workspace": row["workspace"] or meta.get("workspace", ""),
-            "title": meta.get("title", row["subject"])[:64],
+            "title": meta.get("title", row["subject"])[:160],
             "event": row["event"],
             "time_ago": relative_time_zh(row["occurred_at"], clock),
         })
@@ -321,11 +321,11 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             "kind": row["kind"],
             "badge": kind_badges.get(row["kind"], row["kind"]),
             "action": action_zh,
-            "title": meta.get("title", row["subject"])[:80],
+            "title": meta.get("title", row["subject"])[:180],
             "subject": row["subject"],
             "workspace": row["workspace"],
             "session_short": "#" + sid[:8] if len(sid) >= 8 and sid not in ("dream-pass", "author") else sid,
-            "task_title": task_label[:72],
+            "task_title": task_label[:120],
             "occurred_at": row["occurred_at"],
             "time_ago": relative_time_zh(row["occurred_at"], clock),
         })
@@ -697,6 +697,269 @@ def menubar_item_detail(store: Store, kind: str, subject: str,
             "updated_ago": relative_time_zh(updated_at_iso, clock) if updated_at_iso else "",
         },
         "copy_markdown": "\n".join(md_parts),
+    }
+
+
+def _channel_meta(event_name: str, source_raw: str) -> Tuple[str, str]:
+    prefix = str(source_raw or "").split(":", 1)[0].strip().lower()
+    if event_name == "executed" or prefix == "execute":
+        return ("execute", "零模型执行")
+    if event_name == "selected" or prefix == "route":
+        return ("route", "契约路由匹配")
+    if event_name == "expanded" or prefix == "expand":
+        return ("context", "L3 展开详情")
+    if prefix == "session_index":
+        return ("session_index", "L0 开场自动注入")
+    if prefix == "context":
+        return ("context", "L1/L2 分层上下文")
+    if prefix == "search":
+        return ("search", "MCP 主动检索")
+    if prefix == "recall":
+        return ("recall", "精确条件召回")
+    return ("other", "本地记忆调用")
+
+
+def _local_clock_hm(iso_value: Optional[str]) -> str:
+    ts = parsed(iso_value)
+    if ts is None:
+        return ""
+    return ts.astimezone().strftime("%H:%M:%S")
+
+
+def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
+    require(isinstance(hours, int) and 1 <= hours <= 720, "Hours window must be between 1 and 720")
+    clock = datetime.now(timezone.utc)
+    cutoff_iso = (clock - timedelta(hours=hours)).isoformat()
+    lookup = _knowledge_title_catalog(store)
+
+    total_hits = int(store.db.execute(
+        "SELECT count(*) FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed')"
+    ).fetchone()[0] or 0)
+    window_hits = int(store.db.execute(
+        "SELECT count(*) FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed') "
+        "AND occurred_at >= ?",
+        (cutoff_iso,),
+    ).fetchone()[0] or 0)
+
+    # Session -> descriptive task title
+    session_titles: Dict[str, str] = {}
+    fallback_short_titles: Dict[str, str] = {}
+    for row in store.db.execute(
+        "SELECT session,title FROM task_runs ORDER BY updated_at DESC LIMIT 250"
+    ):
+        sid = row["session"]
+        cleaned = _clean_task_title(row["title"])
+        if not cleaned:
+            continue
+        if sid not in fallback_short_titles:
+            fallback_short_titles[sid] = cleaned
+        if sid not in session_titles and len(cleaned) > 6:
+            session_titles[sid] = cleaned
+    for row in store.db.execute("SELECT session,title FROM live_sessions"):
+        sid = row["session"]
+        cleaned = _clean_task_title(row["title"])
+        if cleaned and len(cleaned) > 6 and sid not in session_titles:
+            session_titles[sid] = cleaned
+    for sid, short_val in fallback_short_titles.items():
+        session_titles.setdefault(sid, short_val)
+
+    # Session retrieval receipts for matching search queries near event timestamp
+    session_receipts: Dict[str, List[Tuple[datetime, str]]] = {}
+    for row in store.db.execute(
+        "SELECT session,created_at,body FROM client_receipts WHERE client='retrieval' "
+        "ORDER BY created_at DESC LIMIT 150"
+    ):
+        sid = row["session"]
+        ts = parsed(row["created_at"])
+        if not sid or ts is None:
+            continue
+        try:
+            q = str(json.loads(row["body"]).get("query", "")).strip()
+        except ValueError:
+            q = ""
+        if q:
+            session_receipts.setdefault(sid, []).append((ts, q[:96]))
+
+    def _match_query(sid: str, occurred_iso: str, channel_key: str) -> str:
+        if channel_key not in ("search", "context", "route"):
+            return ""
+        ev_ts = parsed(occurred_iso)
+        if ev_ts is None:
+            return ""
+        candidates = session_receipts.get(sid, [])
+        best_q = ""
+        best_delta = 5.0
+        for r_ts, q_text in candidates:
+            delta = abs((ev_ts - r_ts).total_seconds())
+            if delta <= best_delta:
+                best_delta = delta
+                best_q = q_text
+        return best_q
+
+    kind_badges = {
+        "memo": "避坑 Memo",
+        "claim": "实证 Claim",
+        "solution": "P/R/Q 契约",
+    }
+
+    raw_rows = store.db.execute(
+        "SELECT id,workspace,kind,subject,version,event,session,source,occurred_at "
+        "FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed') "
+        "AND occurred_at >= ? ORDER BY occurred_at DESC LIMIT 120",
+        (cutoff_iso,),
+    ).fetchall()
+
+    by_kind: Dict[str, int] = {"memo": 0, "claim": 0, "solution": 0}
+    channel_counts: Dict[str, Dict[str, Any]] = {}
+    top_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    distinct_sessions = set()
+    events_out: List[Dict[str, Any]] = []
+
+    for row in raw_rows:
+        kind = row["kind"]
+        subj = row["subject"]
+        sid = row["session"]
+        ws = row["workspace"]
+        occ = row["occurred_at"]
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+        if sid:
+            distinct_sessions.add(sid)
+
+        ch_key, ch_label = _channel_meta(row["event"], row["source"])
+        ch_entry = channel_counts.setdefault(ch_key, {"key": ch_key, "label": ch_label, "count": 0})
+        ch_entry["count"] += 1
+
+        meta = lookup.get((kind, subj), {})
+        resolved_title = meta.get("title", subj)[:200]
+        resolved_ws = ws or meta.get("workspace", "")
+
+        t_key = (kind, subj)
+        if t_key not in top_map:
+            top_map[t_key] = {
+                "kind": kind,
+                "badge": kind_badges.get(kind, kind),
+                "subject": subj,
+                "workspace": resolved_ws,
+                "title": resolved_title,
+                "hit_count": 0,
+                "sessions": set(),
+                "last_occurred_at": occ,
+                "last_hit_ago": relative_time_zh(occ, clock),
+            }
+        top_map[t_key]["hit_count"] += 1
+        if sid:
+            top_map[t_key]["sessions"].add(sid)
+
+        matched_q = _match_query(sid, occ, ch_key)
+        events_out.append({
+            "id": row["id"],
+            "kind": kind,
+            "badge": kind_badges.get(kind, kind),
+            "subject": subj,
+            "workspace": resolved_ws,
+            "title": resolved_title,
+            "version": int(row["version"] or 1),
+            "channel_key": ch_key,
+            "channel_label": ch_label,
+            "session_short": "#" + sid[:8] if len(sid) >= 8 else sid,
+            "task_title": session_titles.get(sid, "")[:76],
+            "query": matched_q,
+            "local_time": _local_clock_hm(occ),
+            "time_ago": relative_time_zh(occ, clock),
+            "occurred_at": occ,
+        })
+
+    top_items = sorted(
+        top_map.values(),
+        key=lambda item: (-item["hit_count"], item["last_occurred_at"]),
+    )
+    top_items_clean = [
+        {
+            "kind": item["kind"],
+            "badge": item["badge"],
+            "subject": item["subject"],
+            "workspace": item["workspace"],
+            "title": item["title"],
+            "hit_count": item["hit_count"],
+            "sessions_count": len(item["sessions"]),
+            "last_hit_ago": item["last_hit_ago"],
+        }
+        for item in top_items
+    ]
+    channels_sorted = sorted(channel_counts.values(), key=lambda c: -c["count"])
+
+    # If 24h has 0 hits, include up to 8 most recent historical hits for context
+    fallback_events: List[Dict[str, Any]] = []
+    if not events_out:
+        hist_rows = store.db.execute(
+            "SELECT id,workspace,kind,subject,version,event,session,source,occurred_at "
+            "FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed') "
+            "ORDER BY occurred_at DESC LIMIT 8"
+        ).fetchall()
+        for row in hist_rows:
+            kind = row["kind"]
+            subj = row["subject"]
+            sid = row["session"]
+            occ = row["occurred_at"]
+            ch_key, ch_label = _channel_meta(row["event"], row["source"])
+            meta = lookup.get((kind, subj), {})
+            fallback_events.append({
+                "id": row["id"],
+                "kind": kind,
+                "badge": kind_badges.get(kind, kind),
+                "subject": subj,
+                "workspace": row["workspace"] or meta.get("workspace", ""),
+                "title": meta.get("title", subj)[:200],
+                "version": int(row["version"] or 1),
+                "channel_key": ch_key,
+                "channel_label": ch_label,
+                "session_short": "#" + sid[:8] if len(sid) >= 8 else sid,
+                "task_title": session_titles.get(sid, "")[:76],
+                "query": _match_query(sid, occ, ch_key),
+                "local_time": _local_clock_hm(occ),
+                "time_ago": relative_time_zh(occ, clock),
+                "occurred_at": occ,
+            })
+
+    md_lines = [
+        f"# 近 {hours} 小时本地知识命中报告",
+        f"- 24h 命中总计: **{window_hits}** 次（历史累计复用 **{total_hits}** 次）",
+        f"- 涉及知识条目: **{len(top_items_clean)}** 条 · 赋能会话: **{len(distinct_sessions)}** 个",
+        f"- 类型分布: Memo ×{by_kind.get('memo', 0)} · Claim ×{by_kind.get('claim', 0)} · P/R/Q 契约 ×{by_kind.get('solution', 0)}",
+    ]
+    if channels_sorted:
+        ch_summary = " · ".join(f"{c['label']} ×{c['count']}" for c in channels_sorted)
+        md_lines.append(f"- 触发渠道: {ch_summary}")
+    if top_items_clean:
+        md_lines.append("\n## 高频命中排行")
+        for idx, t in enumerate(top_items_clean, 1):
+            md_lines.append(f"{idx}. **[{t['badge']}] {t['title']}** — 命中 {t['hit_count']} 次（{t['sessions_count']} 个会话）")
+    if events_out:
+        md_lines.append("\n## 逐条命中明细")
+        for ev in events_out:
+            q_part = f" · 检索词: `{ev['query']}`" if ev["query"] else ""
+            md_lines.append(
+                f"- `{ev['local_time']}` ({ev['time_ago']}) [{ev['channel_label']}] "
+                f"**{ev['title']}** (`{ev['session_short']}`){q_part}"
+            )
+
+    return {
+        "schema": "llr.menubar_hits.v1",
+        "window_hours": hours,
+        "window_hits": window_hits,
+        "total_hits": total_hits,
+        "distinct_items": len(top_items_clean),
+        "distinct_sessions": len(distinct_sessions),
+        "by_kind": {
+            "memo": by_kind.get("memo", 0),
+            "claim": by_kind.get("claim", 0),
+            "solution": by_kind.get("solution", 0),
+        },
+        "channels": channels_sorted,
+        "top_items": top_items_clean,
+        "events": events_out,
+        "recent_fallback_events": fallback_events,
+        "copy_markdown": "\n".join(md_lines),
     }
 
 

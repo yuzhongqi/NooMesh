@@ -27,8 +27,8 @@ from .clients import (hook, install_copilot, install_codex, install_codex_hooks,
 from .mcp import serve
 from .inbox import (claim_proactive_message, configure_inbox, inbox_status,
                     poll_proactive_inbox, register_live_session)
-from .menubar import (menubar_item_detail, menubar_snapshot, open_live_portal,
-                      probe_menubar_running, start_menubar, stop_menubar)
+from .menubar import (menubar_hits_detail, menubar_item_detail, menubar_snapshot,
+                      open_live_portal, probe_menubar_running, start_menubar, stop_menubar)
 from .memos import invalidate_memo, propose_memo
 from .notifier import configure_notifier, notifier_status, send_test_notification
 from .probes import android_node
@@ -341,6 +341,8 @@ def parser() -> argparse.ArgumentParser:
     portal.add_argument("--workspace", required=True)
     portal.add_argument("--output", type=Path, required=True)
     commands.add_parser("menubar-snapshot")
+    mb_hits = commands.add_parser("menubar-hits")
+    mb_hits.add_argument("--hours", type=int, default=24)
     mb_item = commands.add_parser("menubar-item")
     mb_item.add_argument("--kind", choices=["memo", "claim", "solution"], required=True)
     mb_item.add_argument("--subject", required=True)
@@ -591,6 +593,8 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         return export_portal(store, args.workspace, args.output)
     if args.command == "menubar-snapshot":
         return menubar_snapshot(store)
+    if args.command == "menubar-hits":
+        return menubar_hits_detail(store, hours=args.hours)
     if args.command == "menubar-item":
         return menubar_item_detail(store, args.kind, args.subject, workspace=args.workspace)
     if args.command == "menubar-status":
@@ -684,7 +688,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             from .mcp import serve_bridge
             serve_bridge(args.home)
             return 0
-        elif args.command in ("menubar-snapshot", "menubar-item", "menubar-status",
+        elif args.command in ("menubar-snapshot", "menubar-hits", "menubar-item", "menubar-status",
                               "menubar-start", "menubar-stop", "menubar-open-portal"):
             store = Store(args.home)
             try:

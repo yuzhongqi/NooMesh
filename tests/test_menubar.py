@@ -7,8 +7,9 @@ from local_learning_runtime.core import Store, file_digest
 from local_learning_runtime.discovery import register_alias
 from local_learning_runtime.inbox import register_live_session
 from local_learning_runtime.learning import authorize, search
-from local_learning_runtime.menubar import (menubar_item_detail, menubar_snapshot,
-                                            open_live_portal, probe_menubar_running)
+from local_learning_runtime.menubar import (menubar_hits_detail, menubar_item_detail,
+                                            menubar_snapshot, open_live_portal,
+                                            probe_menubar_running)
 from local_learning_runtime.memos import propose_memo
 from local_learning_runtime.solutions import propose_solution
 
@@ -208,6 +209,51 @@ class MenuBarDashboardTests(unittest.TestCase):
 
         hits_after = menubar_snapshot(self.store)["totals"]["today_hits"]
         self.assertEqual(hits_before, hits_after)
+
+    def test_menubar_hits_detail_aggregates_24h_channels_top_items_and_queries(self):
+        # 1) Session index L0 hook injection hit
+        hook(self.store, "copilot", "sessionStart", {
+            "sessionId": "sess-alpha-1111",
+            "cwd": str(self.android_repo),
+            "initialPrompt": "Fix Initializer boot on warm intent",
+        })
+        # 2) Explicit search hit in another session (search() records retrieval receipt automatically)
+        hook(self.store, "copilot", "userPromptSubmitted", {
+            "sessionId": "sess-beta-2222",
+            "cwd": str(self.android_repo),
+            "prompt": "Audit warm intent re-entry in Initializer",
+        })
+        search(
+            self.store, self.android_repo,
+            "Initializer boot warm intent re-entry",
+            "sess-beta-2222",
+            actual={"platform": "android"},
+        )
+
+        snap = menubar_snapshot(self.store)
+        report = menubar_hits_detail(self.store, hours=24)
+        self.assertEqual(report["schema"], "llr.menubar_hits.v1")
+        self.assertEqual(report["window_hits"], snap["totals"]["today_hits"])
+        self.assertGreaterEqual(report["window_hits"], 2)
+        self.assertEqual(report["distinct_items"], 1)
+        self.assertEqual(report["distinct_sessions"], 2)
+        self.assertEqual(report["by_kind"]["memo"], report["window_hits"])
+
+        top = report["top_items"][0]
+        self.assertEqual(top["subject"], "boot-once-guard")
+        self.assertEqual(top["hit_count"], report["window_hits"])
+        self.assertEqual(top["sessions_count"], 2)
+
+        channel_keys = {c["key"] for c in report["channels"]}
+        self.assertIn("search", channel_keys)
+        self.assertIn("session_index", channel_keys)
+
+        self.assertTrue(any(
+            ev["query"] == "Initializer boot warm intent re-entry"
+            and "Audit warm intent re-entry" in ev["task_title"]
+            for ev in report["events"]
+        ))
+        self.assertIn("# 近 24 小时本地知识命中报告", report["copy_markdown"])
 
 
 if __name__ == "__main__":
