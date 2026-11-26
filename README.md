@@ -299,11 +299,12 @@ Microsoft Teams **Workflows** webhook notifies your personal chat (for example
     and replies with `/sessions` when asked to list open sessions.
   - **Native macOS Menu Bar live dashboard (`llr menubar-*`):** Compile and launch a
     zero-Dock-icon Liquid Glass status bar utility (`brain.head.profile` template
-    symbol + live 24h knowledge-hit counter) that visualizes active IDE tasks, exact
-    local `Memo` / `Claim` / `Solution` items retrieved by each session, clickable
-    `24h 知识命中` analytics (per-event log, trigger-channel split, and top-hit ranking),
-    click-to-inspect full knowledge content (`When` / `Rule` / `Trap` / `Verification`,
-    evidence excerpts, and anchored source files), and one-click HTML portal / offline
+    symbol + live 24h knowledge-hit counter) featuring a **Token Savings Gas Gauge**
+    (cumulative net saved tokens, 24h delta, acquisition-cost ROI multiple, and
+    shared-anchor deduplication), active IDE tasks with per-session & per-item saved
+    token badges, clickable `24h 命中` analytics, click-to-inspect full knowledge
+    content (`When` / `Rule` / `Trap` / `Verification`, 4-cell Token Ledger, evidence
+    excerpts, and anchored source files), and one-click HTML portal / offline
     `dream-pass` actions without resetting the Host idle timer:
     ```sh
     llr menubar-start --install-login-agent --approve

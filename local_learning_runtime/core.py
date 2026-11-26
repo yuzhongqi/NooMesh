@@ -321,6 +321,17 @@ class Store:
                 state TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS token_baselines (
+                workspace TEXT NOT NULL REFERENCES workspaces(id),
+                kind TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                acquisition_tokens INTEGER NOT NULL,
+                reusable_saved_tokens INTEGER NOT NULL,
+                injected_tokens INTEGER NOT NULL,
+                basis TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(workspace, kind, subject));
         """)
         trace_cols = {row["name"] for row in self.db.execute("PRAGMA table_info(tool_traces)")}
         if "detail" not in trace_cols:

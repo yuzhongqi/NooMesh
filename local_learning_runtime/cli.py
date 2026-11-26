@@ -30,6 +30,7 @@ from .inbox import (claim_proactive_message, configure_inbox, inbox_status,
 from .menubar import (menubar_hits_detail, menubar_item_detail, menubar_snapshot,
                       open_live_portal, probe_menubar_running, start_menubar, stop_menubar)
 from .memos import invalidate_memo, propose_memo
+from .tokens import record_token_baseline
 from .notifier import configure_notifier, notifier_status, send_test_notification
 from .probes import android_node
 from .relay import (cancel_interactive_run, configure_relay, poll_interactive_run,
@@ -187,7 +188,15 @@ def parser() -> argparse.ArgumentParser:
     memo_prop.add_argument("spec")
     memo_prop.add_argument("--expected-version", type=int, required=True)
     memo_prop.add_argument("--session", default="author")
+    memo_prop.add_argument("--acquisition-tokens", type=int)
     memo_prop.add_argument("--approve", action="store_true")
+    tok_rec = commands.add_parser("token-record")
+    tok_rec.add_argument("--workspace", required=True)
+    tok_rec.add_argument("--kind", choices=["memo", "claim", "solution"], required=True)
+    tok_rec.add_argument("--subject", required=True)
+    tok_rec.add_argument("--acquisition-tokens", type=int, required=True)
+    tok_rec.add_argument("--injected-tokens", type=int)
+    tok_rec.add_argument("--approve", action="store_true")
     memo_inv = commands.add_parser("memo-invalidate")
     memo_inv.add_argument("memo")
     memo_inv.add_argument("--workspace", required=True)
@@ -492,7 +501,13 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
                             args.expected_version, args.strict_links)
     if args.command == "memo-propose":
         return propose_memo(store, read_json(args.spec), args.expected_version,
-                            args.approve, args.session)
+                            args.approve, args.session, args.acquisition_tokens)
+    if args.command == "token-record":
+        require(args.approve, "Explicit approval required to record token baseline")
+        return record_token_baseline(
+            store, args.workspace, args.kind, args.subject,
+            args.acquisition_tokens, injected_tokens=args.injected_tokens, basis="measured",
+        )
     if args.command == "memo-invalidate":
         return invalidate_memo(store, args.workspace, args.memo, args.version,
                                args.state, args.reason, args.approve)

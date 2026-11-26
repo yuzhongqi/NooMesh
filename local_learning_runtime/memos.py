@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .core import (MAX_PACKET_BYTES, RuntimeErrorBase, Store, canonical, digest,
                    identifier, now, object_fields, require, validate_anchor, verify_anchor)
@@ -15,7 +15,7 @@ VERIFICATION_METHODS = ("source_symbol_contract", "test_case", "incident_fix")
 
 def validate_memo(store: Store, spec: Dict[str, Any]) -> None:
     object_fields(spec, {"schema", "id", "workspace", "kind", "title",
-                         "when", "rule", "trap", "verification"}, {"tags"})
+                         "when", "rule", "trap", "verification"}, {"tags", "acquisition_tokens"})
     require(spec["schema"] == "llr.memo.v1", "Unknown memo schema")
     identifier(spec["id"], "Memo ID")
     store.workspace(spec["workspace"])
@@ -29,6 +29,10 @@ def validate_memo(store: Store, spec: Dict[str, Any]) -> None:
         require(isinstance(tags, list) and len(tags) <= 16
                 and all(isinstance(t, str) and 0 < len(t.strip()) <= 64 for t in tags),
                 "Memo tags must be up to 16 bounded strings")
+    if "acquisition_tokens" in spec:
+        acq = spec["acquisition_tokens"]
+        require(type(acq) is int and 1 <= acq <= 10_000_000,
+                "Memo acquisition_tokens must be an integer between 1 and 10000000")
     ver = spec["verification"]
     object_fields(ver, {"method", "summary", "anchors"})
     require(ver["method"] in VERIFICATION_METHODS, "Unknown memo verification method")
@@ -74,10 +78,13 @@ def verify_memo_live(store: Store, workspace: str, memo_id: str) -> Dict[str, An
 
 
 def propose_memo(store: Store, spec: Dict[str, Any], expected_version: int,
-                 approve: bool, session: str = "author") -> Dict[str, Any]:
+                 approve: bool, session: str = "author",
+                 acquisition_tokens: Optional[int] = None) -> Dict[str, Any]:
     require(approve, "Explicit approval required to publish a rule or trap memo")
     require(type(expected_version) is int and expected_version >= 0, "Invalid expected version")
     identifier(session, "Session")
+    if acquisition_tokens is not None:
+        spec = dict(spec, acquisition_tokens=acquisition_tokens)
     validate_memo(store, spec)
     safe, redactions = sanitize(spec, privacy_key(store))
     require(not redactions, "Memo contains sensitive literals; sanitize before publishing")
@@ -103,6 +110,19 @@ def propose_memo(store: Store, spec: Dict[str, Any], expected_version: int,
         record_usage(store, safe["workspace"], "memo", safe["id"], version,
                      "verified_success", session, "memo-publish:" + fingerprint[:24],
                      occurred_at=timestamp)
+    from .tokens import estimate_text_tokens, probe_copilot_turn_tokens, record_token_baseline
+    inj_est = max(60, estimate_text_tokens(
+        f"{safe['title']} {safe['when']} {safe['rule']} {safe['trap']}"
+    ))
+    explicit_acq = safe.get("acquisition_tokens")
+    if isinstance(explicit_acq, int) and explicit_acq > 0:
+        record_token_baseline(store, safe["workspace"], "memo", safe["id"],
+                              explicit_acq, injected_tokens=inj_est, basis="measured")
+    else:
+        turn_tok = probe_copilot_turn_tokens(session)
+        if turn_tok is not None:
+            record_token_baseline(store, safe["workspace"], "memo", safe["id"],
+                                  turn_tok, injected_tokens=inj_est, basis="turn_telemetry")
     return {"status": "PUBLISHED", "workspace": safe["workspace"], "id": safe["id"],
             "version": version, "fingerprint": fingerprint, "verification": verification}
 

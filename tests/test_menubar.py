@@ -6,12 +6,13 @@ from local_learning_runtime.clients import hook
 from local_learning_runtime.core import Store, file_digest
 from local_learning_runtime.discovery import register_alias
 from local_learning_runtime.inbox import register_live_session
-from local_learning_runtime.learning import authorize, search
+from local_learning_runtime.learning import authorize, forget_workspace, search
 from local_learning_runtime.menubar import (menubar_hits_detail, menubar_item_detail,
                                             menubar_snapshot, open_live_portal,
                                             probe_menubar_running)
 from local_learning_runtime.memos import propose_memo
 from local_learning_runtime.solutions import propose_solution
+from local_learning_runtime.tokens import record_token_baseline
 
 
 class MenuBarDashboardTests(unittest.TestCase):
@@ -251,9 +252,73 @@ class MenuBarDashboardTests(unittest.TestCase):
         self.assertTrue(any(
             ev["query"] == "Initializer boot warm intent re-entry"
             and "Audit warm intent re-entry" in ev["task_title"]
+            and ev["saved_tokens"] > 0
             for ev in report["events"]
         ))
-        self.assertIn("# 近 24 小时本地知识命中报告", report["copy_markdown"])
+        self.assertIn("# 近 24 小时本地知识命中与 Token 节省报告", report["copy_markdown"])
+
+    def test_token_gas_gauge_measured_baseline_and_shared_anchor_dedup(self):
+        # Record an explicit measured acquisition token cost for boot-once-guard (12,000 tokens).
+        rec = record_token_baseline(
+            self.store, "demo/android", "memo", "boot-once-guard",
+            acquisition_tokens=12_000, injected_tokens=200, basis="measured",
+        )
+        self.assertEqual(rec["reusable_saved_tokens"], 11_800)
+
+        # Also publish a paired Claim anchored to the EXACT same Initializer.kt file.
+        conds = {"platform": "android", "artifact_sha256": file_digest(self.anchor_file)}
+        ev = self.store.observe(
+            "ev-shared-anchor", "demo/android", conds,
+            b'{"verified": true}', "application/json",
+        )
+        cand = self.store.propose({
+            "id": "boot-once-claim",
+            "workspace": "demo/android",
+            "task_type": "boot-guard",
+            "statement": "Initializer boot must not run stale warm intents.",
+            "conditions": conds,
+            "anchors": [{
+                "path": "Initializer.kt",
+                "sha256": file_digest(self.anchor_file),
+                "symbols": ["Initializer", "boot"],
+            }],
+            "checks": [{
+                "kind": "json_equals",
+                "evidence_id": ev["evidence_id"],
+                "pointer": "/verified",
+                "expected": True,
+            }],
+            "dependencies": [],
+            "provenance": {"title": "Initializer boot once claim", "acquisition_tokens": 12_000},
+        })
+        self.store.accept(cand["candidate_id"], 0, None, True)
+
+        # Retrieve BOTH in a single search call; shared Initializer.kt must NOT double-count 12k * 2.
+        found = search(
+            self.store, self.android_repo,
+            "Initializer boot warm intent",
+            "sess-dedup-9999",
+            actual=conds,
+        )
+        self.assertEqual(found["status"], "FOUND")
+
+        snap = menubar_snapshot(self.store)
+        gauge = snap["gas_gauge"]
+        # Primary item saves ~11,800; secondary shared-anchor item only gets bounded marginal credit (< 1,000).
+        self.assertGreaterEqual(gauge["total_saved_tokens"], 11_800)
+        self.assertLess(gauge["total_saved_tokens"], 14_000)
+        self.assertGreater(gauge["fill_ratio"], 0.0)
+
+        detail = menubar_item_detail(self.store, "memo", "boot-once-guard", workspace="demo/android")
+        self.assertEqual(detail["tokens"]["basis"], "measured")
+        self.assertEqual(detail["tokens"]["acquisition_tokens"], 12_000)
+        self.assertEqual(detail["tokens"]["saved_per_hit"], 11_800)
+
+        forget_workspace(self.store, "demo/android", approve=True)
+        remaining = self.store.db.execute(
+            "SELECT count(*) FROM token_baselines WHERE workspace='demo/android'"
+        ).fetchone()[0]
+        self.assertEqual(remaining, 0)
 
 
 if __name__ == "__main__":

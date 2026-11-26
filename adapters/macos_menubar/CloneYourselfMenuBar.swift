@@ -25,6 +25,21 @@ struct TotalsSnapshot: Decodable {
     let active_sessions: Int
 }
 
+struct GasGaugeSnapshot: Decodable {
+    let total_saved_tokens: Int
+    let total_saved_formatted: String
+    let today_saved_tokens: Int
+    let today_saved_formatted: String
+    let total_injected_tokens: Int
+    let today_injected_tokens: Int
+    let reused_acquisition_tokens: Int
+    let reused_acquisition_formatted: String
+    let roi_multiple: Double
+    let fill_ratio: Double
+    let next_milestone_tokens: Int
+    let next_milestone_formatted: String
+}
+
 struct SessionKnowledgeItem: Decodable, Identifiable {
     var id: String { "\(kind):\(subject)" }
     let kind: String
@@ -33,6 +48,10 @@ struct SessionKnowledgeItem: Decodable, Identifiable {
     let title: String
     let event: String
     let time_ago: String
+    let saved_tokens: Int?
+    let saved_formatted: String?
+    let acquisition_tokens: Int?
+    let acquisition_formatted: String?
 }
 
 struct LiveSessionItem: Decodable, Identifiable {
@@ -45,6 +64,8 @@ struct LiveSessionItem: Decodable, Identifiable {
     let state: String
     let last_query: String
     let knowledge_used: [SessionKnowledgeItem]
+    let saved_tokens: Int?
+    let saved_formatted: String?
     let updated_ago: String
 }
 
@@ -61,6 +82,9 @@ struct ActivityFeedItem: Decodable, Identifiable {
     let task_title: String
     let occurred_at: String
     let time_ago: String
+    let saved_tokens: Int?
+    let acquisition_tokens: Int?
+    let token_badge: String?
 }
 
 struct MenuBarSnapshot: Decodable {
@@ -72,6 +96,7 @@ struct MenuBarSnapshot: Decodable {
     let last_hit_ago: String
     let host: HostStatusSnapshot
     let totals: TotalsSnapshot
+    let gas_gauge: GasGaugeSnapshot
     let live_sessions: [LiveSessionItem]
     let recent_activity: [ActivityFeedItem]
 }
@@ -99,6 +124,18 @@ struct KnowledgeUsageSummary: Decodable {
     let updated_ago: String
 }
 
+struct KnowledgeTokenSummary: Decodable {
+    let acquisition_tokens: Int
+    let acquisition_formatted: String
+    let injected_tokens: Int
+    let saved_per_hit: Int
+    let saved_per_hit_formatted: String
+    let cumulative_saved_tokens: Int
+    let cumulative_saved_formatted: String
+    let basis: String
+    let basis_label: String
+}
+
 struct KnowledgeItemDetail: Decodable {
     let schema: String
     let kind: String
@@ -111,6 +148,7 @@ struct KnowledgeItemDetail: Decodable {
     let integrity_status: String
     let integrity_label: String
     let tags: [String]
+    let tokens: KnowledgeTokenSummary
     let sections: [KnowledgeDetailSection]
     let anchors: [KnowledgeAnchorDetail]
     let usage: KnowledgeUsageSummary
@@ -151,6 +189,10 @@ struct HitsTopItem: Decodable, Identifiable {
     let hit_count: Int
     let sessions_count: Int
     let last_hit_ago: String
+    let acquisition_tokens: Int
+    let acquisition_formatted: String
+    let window_saved_tokens: Int
+    let window_saved_formatted: String
 }
 
 struct HitsEventItem: Decodable, Identifiable {
@@ -169,6 +211,9 @@ struct HitsEventItem: Decodable, Identifiable {
     let local_time: String
     let time_ago: String
     let occurred_at: String
+    let saved_tokens: Int
+    let saved_formatted: String
+    let acquisition_formatted: String
 }
 
 struct HitsBreakdownReport: Decodable {
@@ -176,6 +221,12 @@ struct HitsBreakdownReport: Decodable {
     let window_hours: Int
     let window_hits: Int
     let total_hits: Int
+    let window_saved_tokens: Int
+    let window_saved_formatted: String
+    let total_saved_tokens: Int
+    let total_saved_formatted: String
+    let window_injected_tokens: Int
+    let roi_multiple: Double
     let distinct_items: Int
     let distinct_sessions: Int
     let by_kind: HitsByKind
@@ -686,6 +737,117 @@ struct ServiceStatusItem: View {
     }
 }
 
+struct TokenGasGaugeCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+    let gauge: GasGaugeSnapshot
+    let action: () -> Void
+
+    private var clampedFill: CGFloat {
+        CGFloat(min(1.0, max(0.0, gauge.fill_ratio)))
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                // 240° Automotive / Apple Watch Style Arc Gas Gauge
+                ZStack {
+                    Circle()
+                        .trim(from: 0.16, to: 0.84)
+                        .stroke(
+                            GlassPalette.recessedChannelFill(colorScheme),
+                            style: StrokeStyle(lineWidth: 5.5, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(90))
+
+                    Circle()
+                        .trim(from: 0.16, to: 0.16 + 0.68 * clampedFill)
+                        .stroke(
+                            LinearGradient(
+                                colors: colorScheme == .dark
+                                    ? [Color.white.opacity(0.55), Color.white]
+                                    : [Color.black.opacity(0.45), Color.black.opacity(0.88)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            style: StrokeStyle(lineWidth: 5.5, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(90))
+                        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: clampedFill)
+
+                    VStack(spacing: 0.5) {
+                        Image(systemName: "gauge.with.dots.needle.67percent")
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundColor(GlassPalette.primaryLabel)
+                        Text(String(format: "%.1f×", gauge.roi_multiple))
+                            .font(.system(size: 8.5, weight: .semibold, design: .rounded).monospacedDigit())
+                            .foregroundColor(GlassPalette.secondaryLabel)
+                    }
+                }
+                .frame(width: 48, height: 48)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Text("经验复用节省 Token 表盘")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundColor(GlassPalette.secondaryLabel)
+                        Spacer()
+                        Text("目标 \(gauge.next_milestone_formatted)")
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundColor(GlassPalette.tertiaryLabel)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8.5, weight: .semibold))
+                            .foregroundColor(isHovering ? GlassPalette.primaryLabel : GlassPalette.tertiaryLabel)
+                    }
+
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("~\(gauge.total_saved_formatted)")
+                            .font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundColor(GlassPalette.primaryLabel)
+                        Text("Tokens 累计净省")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundColor(GlassPalette.secondaryLabel)
+                        Spacer()
+                    }
+
+                    HStack(spacing: 5.5) {
+                        gaugeMicroPill("24h 省 +\(gauge.today_saved_formatted)")
+                        gaugeMicroPill("获取投入 ~\(gauge.reused_acquisition_formatted)")
+                        gaugeMicroPill(String(format: "回报 %.1f×", gauge.roi_multiple))
+                    }
+                }
+            }
+            .padding(.horizontal, 11.5)
+            .padding(.vertical, 9.5)
+            .liquidDroplet(cornerRadius: 16, emphasized: isHovering, activeRim: true)
+            .scaleEffect(isHovering ? 1.012 : 1.0)
+            .animation(.easeOut(duration: 0.14), value: isHovering)
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .help("点击查看 Token 节省账本与近 24 小时逐条命中明细")
+    }
+
+    private func gaugeMicroPill(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9.5, weight: .medium, design: .rounded).monospacedDigit())
+            .foregroundColor(GlassPalette.secondaryLabel)
+            .padding(.horizontal, 6.5)
+            .padding(.vertical, 1.5)
+            .background(
+                Capsule()
+                    .fill(GlassPalette.microCapsuleFill(colorScheme))
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.5)
+            )
+    }
+}
+
 struct MetricCard: View {
     @State private var isHovering = false
     let title: String
@@ -864,13 +1026,24 @@ struct SessionKnowledgeRowButton: View {
             let ws = (item.workspace?.isEmpty == false) ? item.workspace : fallbackWorkspace
             onSelect(item.kind, item.subject, ws, item.title)
         }) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5.5) {
                 KnowledgeKindTag(kind: item.kind)
                 Text(item.title)
                     .font(.system(size: 11))
                     .foregroundColor(GlassPalette.primaryLabel)
                     .lineLimit(1)
                 Spacer(minLength: 4)
+                if let saved = item.saved_formatted {
+                    Text("省 ~\(saved)")
+                        .font(.system(size: 9.5, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundColor(GlassPalette.secondaryLabel)
+                        .padding(.horizontal, 5.5)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            Capsule()
+                                .fill(GlassPalette.microCapsuleFill(colorScheme))
+                        )
+                }
                 Text(item.time_ago)
                     .font(.system(size: 10))
                     .foregroundColor(GlassPalette.tertiaryLabel)
@@ -964,9 +1137,15 @@ struct SessionCardView: View {
                         Image(systemName: "sparkles")
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundColor(GlassPalette.secondaryLabel)
-                        Text("已调用本地知识 (\(item.knowledge_used.count)) · 点击查看全文")
+                        Text("已调用本地知识 (\(item.knowledge_used.count))")
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundColor(GlassPalette.secondaryLabel)
+                        Spacer()
+                        if let sessSaved = item.saved_formatted, (item.saved_tokens ?? 0) > 0 {
+                            Text("本会话共省 ~\(sessSaved) tok")
+                                .font(.system(size: 9.5, weight: .semibold, design: .rounded).monospacedDigit())
+                                .foregroundColor(GlassPalette.primaryLabel)
+                        }
                     }
                     .padding(.bottom, 1.5)
                     ForEach(item.knowledge_used) { k in
@@ -989,6 +1168,7 @@ struct SessionCardView: View {
 }
 
 struct ActivityRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
     let item: ActivityFeedItem
     let onSelect: (String, String, String?, String) -> Void
@@ -1000,7 +1180,7 @@ struct ActivityRowView: View {
             onSelect(item.kind, item.subject, item.workspace, item.title)
         }) {
             VStack(alignment: .leading, spacing: 5.5) {
-                HStack(spacing: 6) {
+                HStack(spacing: 5.5) {
                     HStack(spacing: 3.5) {
                         Image(systemName: isLearned ? "checkmark.circle.fill" : "arrow.turn.down.right")
                             .font(.system(size: 9.5, weight: .medium))
@@ -1011,10 +1191,21 @@ struct ActivityRowView: View {
 
                     KnowledgeKindTag(kind: item.kind)
 
-                    Text(item.workspace)
-                        .font(.system(size: 10.5))
-                        .foregroundColor(GlassPalette.tertiaryLabel)
-                        .lineLimit(1)
+                    if let tokBadge = item.token_badge, !tokBadge.isEmpty {
+                        Text(tokBadge)
+                            .font(.system(size: 9.5, weight: .medium, design: .rounded).monospacedDigit())
+                            .foregroundColor(GlassPalette.primaryLabel)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1.5)
+                            .background(
+                                Capsule()
+                                    .fill(GlassPalette.microCapsuleFill(colorScheme))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(GlassPalette.specularRimGradient(colorScheme), lineWidth: 0.5)
+                            )
+                    }
 
                     Spacer()
 
@@ -1101,6 +1292,7 @@ struct KnowledgeDetailView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 9) {
                         overviewCard(detail)
+                        tokenLedgerCard(detail.tokens)
 
                         ForEach(detail.sections) { sec in
                             sectionCard(sec)
@@ -1197,6 +1389,58 @@ struct KnowledgeDetailView: View {
         }
         .padding(12)
         .liquidDroplet(cornerRadius: 16, emphasized: true, activeRim: true, interactiveHover: false)
+    }
+
+    private func tokenLedgerCard(_ tok: KnowledgeTokenSummary) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 5) {
+                Image(systemName: "gauge.with.dots.needle.67percent")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                Text("Token 节省账本")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundColor(GlassPalette.secondaryLabel)
+                Spacer()
+                Text(tok.basis_label)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundColor(GlassPalette.tertiaryLabel)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1.5)
+                    .background(
+                        Capsule()
+                            .fill(GlassPalette.recessedChannelFill(colorScheme))
+                    )
+            }
+
+            HStack(spacing: 6) {
+                ledgerCell(label: "首次获取耗", value: "~\(tok.acquisition_formatted)")
+                ledgerCell(label: "单次注入", value: "\(tok.injected_tokens)")
+                ledgerCell(label: "单次净省", value: "~\(tok.saved_per_hit_formatted)")
+                ledgerCell(label: "累计已省", value: "~\(tok.cumulative_saved_formatted)")
+            }
+        }
+        .padding(11)
+        .liquidDroplet(cornerRadius: 15, interactiveHover: false)
+    }
+
+    private func ledgerCell(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9.5))
+                .foregroundColor(GlassPalette.tertiaryLabel)
+                .lineLimit(1)
+            Text(value)
+                .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundColor(GlassPalette.primaryLabel)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 7.5)
+        .padding(.vertical, 5.5)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(GlassPalette.recessedChannelFill(colorScheme))
+        )
     }
 
     private func sectionCard(_ sec: KnowledgeDetailSection) -> some View {
@@ -1395,6 +1639,20 @@ struct HitsEventRowButton: View {
 
                     KnowledgeKindTag(kind: item.kind)
 
+                    Text("省 ~\(item.saved_formatted)")
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundColor(GlassPalette.primaryLabel)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            Capsule()
+                                .fill(GlassPalette.microCapsuleFill(colorScheme))
+                        )
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(GlassPalette.specularRimGradient(colorScheme, active: true), lineWidth: 0.5)
+                        )
+
                     Spacer()
 
                     Image(systemName: "chevron.right")
@@ -1487,7 +1745,7 @@ struct HitsTopItemRowButton: View {
                             .foregroundColor(GlassPalette.tertiaryLabel)
                             .lineLimit(1)
                         Spacer()
-                        Text("命中 \(item.hit_count) 次")
+                        Text("命中 \(item.hit_count) 次 · 省 ~\(item.window_saved_formatted)")
                             .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
                             .foregroundColor(GlassPalette.primaryLabel)
                             .padding(.horizontal, 7)
@@ -1508,7 +1766,7 @@ struct HitsTopItemRowButton: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
 
-                    Text("赋能 \(item.sessions_count) 个会话 · 最近调用 \(item.last_hit_ago)")
+                    Text("首次获取耗 ~\(item.acquisition_formatted) tok · 赋能 \(item.sessions_count) 个会话 · 最近 \(item.last_hit_ago)")
                         .font(.system(size: 10))
                         .foregroundColor(GlassPalette.tertiaryLabel)
                 }
@@ -1648,31 +1906,24 @@ struct HitsBreakdownView: View {
 
     private func summaryHeroCard(_ report: HitsBreakdownReport) -> some View {
         VStack(alignment: .leading, spacing: 7.5) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("\(report.window_hits)")
-                    .font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text("~\(report.window_saved_formatted)")
+                    .font(.system(size: 23, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundColor(GlassPalette.primaryLabel)
-                Text("次近 24h 本地知识命中")
-                    .font(.system(size: 12.5, weight: .semibold))
+                Text("Tokens 近 24h 净节省")
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(GlassPalette.primaryLabel)
                 Spacer()
-                Text("累计复用 \(report.total_hits) 次")
-                    .font(.system(size: 10.5))
-                    .foregroundColor(GlassPalette.tertiaryLabel)
+                Text("累计总省 ~\(report.total_saved_formatted)")
+                    .font(.system(size: 10.5, weight: .medium, design: .rounded).monospacedDigit())
+                    .foregroundColor(GlassPalette.secondaryLabel)
             }
 
-            HStack(spacing: 6) {
+            HStack(spacing: 5.5) {
+                statChip("24h 命中 \(report.window_hits) 次")
                 statChip("涉及 \(report.distinct_items) 条经验")
                 statChip("赋能 \(report.distinct_sessions) 个会话")
-                if report.by_kind.memo > 0 {
-                    statChip("Memo ×\(report.by_kind.memo)")
-                }
-                if report.by_kind.claim > 0 {
-                    statChip("Claim ×\(report.by_kind.claim)")
-                }
-                if report.by_kind.solution > 0 {
-                    statChip("契约 ×\(report.by_kind.solution)")
-                }
+                statChip(String(format: "回报 %.1f×", report.roi_multiple))
             }
 
             if !report.channels.isEmpty {
@@ -1739,6 +1990,10 @@ struct DashboardPopoverView: View {
             } else {
                 headerSection
                 if let snap = vm.snapshot {
+                    TokenGasGaugeCard(
+                        gauge: snap.gas_gauge,
+                        action: { vm.openHitsBreakdown() }
+                    )
                     metricsSection(snap)
                     LiquidSegmentedBar(
                         selection: $vm.selectedTab,
@@ -1807,7 +2062,7 @@ struct DashboardPopoverView: View {
             footerSection
         }
         .padding(15)
-        .frame(width: 420, height: 556)
+        .frame(width: 426, height: 612)
         .background(Color.clear)
     }
 
@@ -1894,7 +2149,7 @@ struct DashboardPopoverView: View {
     private func metricsSection(_ snap: MenuBarSnapshot) -> some View {
         HStack(spacing: 7.5) {
             MetricCard(
-                title: "24h 知识命中",
+                title: "24h 命中",
                 value: "\(snap.totals.today_hits)",
                 subtitle: "累计 \(snap.totals.total_hits) 次",
                 action: { vm.openHitsBreakdown() }
@@ -2009,7 +2264,7 @@ final class FloatingGlassPanel: NSPanel {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    private let panelSize = NSSize(width: 420, height: 556)
+    private let panelSize = NSSize(width: 426, height: 612)
     private var statusItem: NSStatusItem!
     private var panel: FloatingGlassPanel!
     private var viewModel: DashboardViewModel!
@@ -2099,7 +2354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else {
             button.title = ""
         }
-        button.toolTip = "Clone Yourself · 24h 命中本地知识 \(hits) 次 · \(active) 个会话执行中 · 最近命中: \(snap.last_hit_ago)"
+        button.toolTip = "Clone Yourself · 累计净省 ~\(snap.gas_gauge.total_saved_formatted) Tokens (24h +\(snap.gas_gauge.today_saved_formatted)) · 24h 命中 \(hits) 次 · \(active) 个会话执行中"
     }
 
     @objc private func togglePanel(_ sender: AnyObject?) {

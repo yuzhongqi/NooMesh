@@ -19,6 +19,7 @@ from .knowledge import export_portal
 from .lifecycle import parsed
 from .notifier import default_machine_name, load_notifier_config
 from .relay import load_relay_config
+from .tokens import build_token_profiles, evaluate_hit_events, fallback_profile, format_tokens
 
 LAUNCH_AGENT_LABEL = "com.cloneyourself.menubar"
 
@@ -168,6 +169,11 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
     )
     primary_ws = _select_primary_workspace(store)
     lookup = _knowledge_title_catalog(store)
+    tok_profiles = build_token_profiles(store)
+    tok_eval = evaluate_hit_events(store, tok_profiles, day_ago)
+    ev_savings = tok_eval["event_savings"]
+    sess_saved_map = tok_eval["session_saved_totals"]
+    sess_item_saved = tok_eval["session_item_saved"]
 
     active_claims = sum(
         1 for (kind, _), meta in lookup.items()
@@ -225,9 +231,9 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
                 pass
 
     # Map session -> distinct used knowledge items
-    session_knowledge: Dict[str, List[Dict[str, str]]] = {}
+    session_knowledge: Dict[str, List[Dict[str, Any]]] = {}
     for row in store.db.execute(
-        "SELECT session,workspace,kind,subject,event,occurred_at FROM memory_events "
+        "SELECT id,session,workspace,kind,subject,event,occurred_at FROM memory_events "
         "WHERE event IN ('retrieved','expanded','selected','executed') "
         "ORDER BY occurred_at DESC LIMIT 200"
     ):
@@ -236,6 +242,15 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
         if len(items) >= 4 or any(x["subject"] == row["subject"] and x["kind"] == row["kind"] for x in items):
             continue
         meta = lookup.get((row["kind"], row["subject"]), {})
+        prof = tok_profiles.get((row["kind"], row["subject"])) or fallback_profile(
+            row["kind"], row["subject"], row["workspace"]
+        )
+        ev_tok = ev_savings.get(row["id"], {})
+        saved_val = int(sess_item_saved.get(
+            (sid, row["kind"], row["subject"]),
+            ev_tok.get("saved_tokens", prof["saved_per_hit"]),
+        ))
+        acq_val = int(prof["acquisition_tokens"])
         items.append({
             "kind": row["kind"],
             "subject": row["subject"],
@@ -243,6 +258,10 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             "title": meta.get("title", row["subject"])[:160],
             "event": row["event"],
             "time_ago": relative_time_zh(row["occurred_at"], clock),
+            "saved_tokens": saved_val,
+            "saved_formatted": format_tokens(saved_val),
+            "acquisition_tokens": acq_val,
+            "acquisition_formatted": format_tokens(acq_val),
         })
 
     # Live open sessions (heartbeat within 90s; fallback to recent task_runs if empty)
@@ -265,6 +284,7 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
         client_raw = row["client"]
         client_label = "Codex" if "codex" in client_raw else "VS Code"
         ws_label = row["workspace"] or ("/".join(Path(row["cwd"]).parts[-2:]) if row["cwd"] else "未绑定目录")
+        sess_saved = int(sess_saved_map.get(sid, 0))
         sessions_out.append({
             "session": sid,
             "session_short": "#" + sid[:8],
@@ -274,6 +294,8 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             "state": "active" if row["state"] == "active" else "idle",
             "last_query": session_queries.get(sid, ""),
             "knowledge_used": session_knowledge.get(sid, []),
+            "saved_tokens": sess_saved,
+            "saved_formatted": format_tokens(sess_saved),
             "updated_ago": relative_time_zh(row["updated_at"], clock),
         })
         if len(sessions_out) >= 6:
@@ -315,6 +337,17 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             else "规则发布校验" if sid in ("author", "training", "ab-seed-train")
             else (session_titles.get(sid) or session_queries.get(sid, ""))
         )
+        prof = tok_profiles.get((row["kind"], row["subject"])) or fallback_profile(
+            row["kind"], row["subject"], row["workspace"]
+        )
+        ev_tok = ev_savings.get(row["id"], {})
+        saved_val = int(ev_tok.get("saved_tokens", prof["saved_per_hit"])) if ev_type == "hit" else 0
+        acq_val = int(prof["acquisition_tokens"])
+        token_badge = (
+            f"沉淀耗 ~{format_tokens(acq_val)}"
+            if ev_type == "learned"
+            else f"省 ~{format_tokens(saved_val)}"
+        )
         activity_feed.append({
             "id": row["id"],
             "event_type": ev_type,
@@ -328,6 +361,9 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             "task_title": task_label[:120],
             "occurred_at": row["occurred_at"],
             "time_ago": relative_time_zh(row["occurred_at"], clock),
+            "saved_tokens": saved_val,
+            "acquisition_tokens": acq_val,
+            "token_badge": token_badge,
         })
         if len(activity_feed) >= 12:
             break
@@ -363,6 +399,7 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             "open_sessions": len(sessions_out),
             "active_sessions": active_running_count,
         },
+        "gas_gauge": tok_eval["gas_gauge"],
         "live_sessions": sessions_out,
         "recent_activity": activity_feed,
     }
@@ -655,7 +692,7 @@ def menubar_item_detail(store: Store, kind: str, subject: str,
         ]
         anchors_out = _resolve_anchor_details(store, resolved_ws, sol_anchors)
 
-    # Usage statistics from memory_events (pure read)
+    # Usage statistics & Token Economics from memory_events (pure read)
     hit_row = store.db.execute(
         "SELECT count(*), max(occurred_at) FROM memory_events "
         "WHERE kind=? AND subject=? AND event IN ('retrieved','expanded','selected','executed')",
@@ -664,10 +701,34 @@ def menubar_item_detail(store: Store, kind: str, subject: str,
     hit_count = int(hit_row[0] or 0)
     last_hit_at = hit_row[1]
 
+    tok_profiles = build_token_profiles(store)
+    day_ago_iso = (clock - timedelta(hours=24)).isoformat()
+    tok_eval = evaluate_hit_events(store, tok_profiles, day_ago_iso)
+    prof = tok_profiles.get((kind, subject)) or fallback_profile(kind, subject, resolved_ws)
+    cum_saved = int(tok_eval["item_saved_totals"].get((kind, subject), 0))
+    tokens_summary = {
+        "acquisition_tokens": int(prof["acquisition_tokens"]),
+        "acquisition_formatted": format_tokens(prof["acquisition_tokens"]),
+        "injected_tokens": int(prof["injected_tokens"]),
+        "saved_per_hit": int(prof["saved_per_hit"]),
+        "saved_per_hit_formatted": format_tokens(prof["saved_per_hit"]),
+        "cumulative_saved_tokens": cum_saved,
+        "cumulative_saved_formatted": format_tokens(cum_saved),
+        "basis": str(prof["basis"]),
+        "basis_label": str(prof["basis_label"]),
+    }
+
     md_parts = [
         f"# [{kind_badges.get(kind, kind)}] {title}",
         f"- ID: `{subject}`",
         f"- Workspace: `{resolved_ws}` · Version: `v{version}` · 状态: `{integrity_label}`",
+        (
+            f"- Token 账本 ({tokens_summary['basis_label']}): "
+            f"首次获取耗 `~{tokens_summary['acquisition_formatted']}` · "
+            f"注入开销 `{tokens_summary['injected_tokens']}` · "
+            f"单次净省 `~{tokens_summary['saved_per_hit_formatted']}` · "
+            f"累计复用已省 `~{tokens_summary['cumulative_saved_formatted']}`"
+        ),
     ]
     for sec in sections:
         md_parts.append(f"\n## {sec['label']}\n{sec['body']}")
@@ -689,6 +750,7 @@ def menubar_item_detail(store: Store, kind: str, subject: str,
         "integrity_status": integrity_status,
         "integrity_label": integrity_label,
         "tags": tags,
+        "tokens": tokens_summary,
         "sections": sections,
         "anchors": anchors_out,
         "usage": {
@@ -731,6 +793,10 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
     clock = datetime.now(timezone.utc)
     cutoff_iso = (clock - timedelta(hours=hours)).isoformat()
     lookup = _knowledge_title_catalog(store)
+    tok_profiles = build_token_profiles(store)
+    tok_eval = evaluate_hit_events(store, tok_profiles, cutoff_iso)
+    ev_savings = tok_eval["event_savings"]
+    gas = tok_eval["gas_gauge"]
 
     total_hits = int(store.db.execute(
         "SELECT count(*) FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed')"
@@ -832,6 +898,10 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
         meta = lookup.get((kind, subj), {})
         resolved_title = meta.get("title", subj)[:200]
         resolved_ws = ws or meta.get("workspace", "")
+        prof = tok_profiles.get((kind, subj)) or fallback_profile(kind, subj, resolved_ws)
+        ev_tok = ev_savings.get(row["id"], {})
+        saved_val = int(ev_tok.get("saved_tokens", prof["saved_per_hit"]))
+        acq_val = int(prof["acquisition_tokens"])
 
         t_key = (kind, subj)
         if t_key not in top_map:
@@ -842,11 +912,14 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
                 "workspace": resolved_ws,
                 "title": resolved_title,
                 "hit_count": 0,
+                "window_saved_tokens": 0,
+                "acquisition_tokens": acq_val,
                 "sessions": set(),
                 "last_occurred_at": occ,
                 "last_hit_ago": relative_time_zh(occ, clock),
             }
         top_map[t_key]["hit_count"] += 1
+        top_map[t_key]["window_saved_tokens"] += saved_val
         if sid:
             top_map[t_key]["sessions"].add(sid)
 
@@ -867,11 +940,14 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
             "local_time": _local_clock_hm(occ),
             "time_ago": relative_time_zh(occ, clock),
             "occurred_at": occ,
+            "saved_tokens": saved_val,
+            "saved_formatted": format_tokens(saved_val),
+            "acquisition_formatted": format_tokens(acq_val),
         })
 
     top_items = sorted(
         top_map.values(),
-        key=lambda item: (-item["hit_count"], item["last_occurred_at"]),
+        key=lambda item: (-item["window_saved_tokens"], -item["hit_count"], item["last_occurred_at"]),
     )
     top_items_clean = [
         {
@@ -883,6 +959,10 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
             "hit_count": item["hit_count"],
             "sessions_count": len(item["sessions"]),
             "last_hit_ago": item["last_hit_ago"],
+            "acquisition_tokens": item["acquisition_tokens"],
+            "acquisition_formatted": format_tokens(item["acquisition_tokens"]),
+            "window_saved_tokens": item["window_saved_tokens"],
+            "window_saved_formatted": format_tokens(item["window_saved_tokens"]),
         }
         for item in top_items
     ]
@@ -903,12 +983,16 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
             occ = row["occurred_at"]
             ch_key, ch_label = _channel_meta(row["event"], row["source"])
             meta = lookup.get((kind, subj), {})
+            resolved_ws = row["workspace"] or meta.get("workspace", "")
+            prof = tok_profiles.get((kind, subj)) or fallback_profile(kind, subj, resolved_ws)
+            ev_tok = ev_savings.get(row["id"], {})
+            saved_val = int(ev_tok.get("saved_tokens", prof["saved_per_hit"]))
             fallback_events.append({
                 "id": row["id"],
                 "kind": kind,
                 "badge": kind_badges.get(kind, kind),
                 "subject": subj,
-                "workspace": row["workspace"] or meta.get("workspace", ""),
+                "workspace": resolved_ws,
                 "title": meta.get("title", subj)[:200],
                 "version": int(row["version"] or 1),
                 "channel_key": ch_key,
@@ -919,10 +1003,14 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
                 "local_time": _local_clock_hm(occ),
                 "time_ago": relative_time_zh(occ, clock),
                 "occurred_at": occ,
+                "saved_tokens": saved_val,
+                "saved_formatted": format_tokens(saved_val),
+                "acquisition_formatted": format_tokens(prof["acquisition_tokens"]),
             })
 
     md_lines = [
-        f"# 近 {hours} 小时本地知识命中报告",
+        f"# 近 {hours} 小时本地知识命中与 Token 节省报告",
+        f"- 24h 净节省 Token: **~{gas['today_saved_formatted']}**（历史累计节省 **~{gas['total_saved_formatted']}**，投资回报比 **{gas['roi_multiple']}x**）",
         f"- 24h 命中总计: **{window_hits}** 次（历史累计复用 **{total_hits}** 次）",
         f"- 涉及知识条目: **{len(top_items_clean)}** 条 · 赋能会话: **{len(distinct_sessions)}** 个",
         f"- 类型分布: Memo ×{by_kind.get('memo', 0)} · Claim ×{by_kind.get('claim', 0)} · P/R/Q 契约 ×{by_kind.get('solution', 0)}",
@@ -931,16 +1019,19 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
         ch_summary = " · ".join(f"{c['label']} ×{c['count']}" for c in channels_sorted)
         md_lines.append(f"- 触发渠道: {ch_summary}")
     if top_items_clean:
-        md_lines.append("\n## 高频命中排行")
+        md_lines.append("\n## 高频命中与节省排行")
         for idx, t in enumerate(top_items_clean, 1):
-            md_lines.append(f"{idx}. **[{t['badge']}] {t['title']}** — 命中 {t['hit_count']} 次（{t['sessions_count']} 个会话）")
+            md_lines.append(
+                f"{idx}. **[{t['badge']}] {t['title']}** — 命中 {t['hit_count']} 次 · "
+                f"本窗口省 `~{t['window_saved_formatted']}`（首次获取耗 `~{t['acquisition_formatted']}`）"
+            )
     if events_out:
         md_lines.append("\n## 逐条命中明细")
         for ev in events_out:
             q_part = f" · 检索词: `{ev['query']}`" if ev["query"] else ""
             md_lines.append(
                 f"- `{ev['local_time']}` ({ev['time_ago']}) [{ev['channel_label']}] "
-                f"**{ev['title']}** (`{ev['session_short']}`){q_part}"
+                f"**{ev['title']}** — 省 `~{ev['saved_formatted']}` (`{ev['session_short']}`){q_part}"
             )
 
     return {
@@ -948,6 +1039,12 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
         "window_hours": hours,
         "window_hits": window_hits,
         "total_hits": total_hits,
+        "window_saved_tokens": gas["today_saved_tokens"],
+        "window_saved_formatted": gas["today_saved_formatted"],
+        "total_saved_tokens": gas["total_saved_tokens"],
+        "total_saved_formatted": gas["total_saved_formatted"],
+        "window_injected_tokens": gas["today_injected_tokens"],
+        "roi_multiple": gas["roi_multiple"],
         "distinct_items": len(top_items_clean),
         "distinct_sessions": len(distinct_sessions),
         "by_kind": {
