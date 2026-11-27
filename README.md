@@ -605,7 +605,10 @@ L3 按完整字段展开。`context` 默认 6000 UTF-8 bytes，最大 12000；�
 本地执行器读取完整 contract，不凭摘要执行。
 
 `llr.memo.v1`（[memo.v1.schema.json](schemas/memo.v1.schema.json)）为架构边界与排障经验提供一等公民的
-**`When + Rule + Trap + Verification（符号锚点）`** 闭环结构；`llr dream-pass`（及只读 MCP
+**`When + Rule + Trap + Verification（符号锚点）`** 闭环结构；**所有 `Memo`、`Claim`、`Solution` 及会话展示标题
+（可通过 `llr session-title --session <id> --title "<summary>"` 显式标注，或自动从本地会话元数据提取并压缩
+PR/Bug/IcM 链接）均遵循 `<现象或场景>：<明确根因或核心结论>` 的人类可读总结规范**（拒绝裸 URL 或原始断言转储），确保在状态栏
+中一眼即可识别当前任务与复用的具体经验。`llr dream-pass`（及只读 MCP
 `local_learning_dream`）在不调用任何模型的前提下离线复核符号锚点、修补主题断链并汇总 `fail -> pass`
 排障转折线索。
 

@@ -91,7 +91,8 @@ def configure_inbox(store: Store, approve: bool,
 def register_live_session(store: Store, session: str, client: str = "copilot",
                           cwd: str = "", title: str = "",
                           state: str = "idle",
-                          touch_activity: bool = False) -> Dict[str, Any]:
+                          touch_activity: bool = False,
+                          display_title: str = "") -> Dict[str, Any]:
     require(isinstance(session, str) and 1 <= len(session) <= 128, "Invalid session ID")
     key = privacy_key(store)
     safe_cwd = str(Path(cwd).expanduser().resolve()) if cwd and Path(cwd).expanduser().exists() else str(cwd)[:240]
@@ -99,19 +100,21 @@ def register_live_session(store: Store, session: str, client: str = "copilot",
     if safe_cwd and Path(safe_cwd).is_dir():
         found = discover(store, Path(safe_cwd), session[:64])
         ws = found.get("workspace")
-    safe_title = sanitize(str(title)[:120], key)[0] if (
+    safe_title = sanitize(str(title)[:240], key)[0] if (
         title and not str(title).lstrip().startswith("<system_notification>")
     ) else ""
+    safe_display = sanitize(str(display_title)[:120], key)[0].strip() if display_title else ""
     clean_state = str(state)[:24]
     ts = now()
     with store.transaction():
         old = store.db.execute(
-            "SELECT cwd,workspace,title,state,updated_at FROM live_sessions WHERE session=?",
+            "SELECT cwd,workspace,title,state,updated_at,display_title FROM live_sessions WHERE session=?",
             (session,),
         ).fetchone()
         final_cwd = safe_cwd or (old["cwd"] if old else "")
         final_ws = ws or (old["workspace"] if old else None)
         final_title = safe_title or (old["title"] if old else "")
+        final_display = safe_display or (old["display_title"] if old else "")
         if old is None:
             final_updated = ts
         elif touch_activity or clean_state != old["state"] or (bool(safe_title) and safe_title != old["title"]):
@@ -119,17 +122,34 @@ def register_live_session(store: Store, session: str, client: str = "copilot",
         else:
             final_updated = old["updated_at"]
         store.db.execute(
-            "INSERT INTO live_sessions VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(session) DO UPDATE SET "
+            "INSERT INTO live_sessions "
+            "(session,client,cwd,workspace,title,state,heartbeat_at,updated_at,display_title) "
+            "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(session) DO UPDATE SET "
             "client=excluded.client,cwd=excluded.cwd,workspace=excluded.workspace,"
             "title=excluded.title,state=excluded.state,heartbeat_at=excluded.heartbeat_at,"
-            "updated_at=excluded.updated_at",
-            (session, str(client)[:24], final_cwd, final_ws, final_title, clean_state, ts, final_updated),
+            "updated_at=excluded.updated_at,display_title=excluded.display_title",
+            (session, str(client)[:24], final_cwd, final_ws, final_title,
+             clean_state, ts, final_updated, final_display),
         )
         store.db.execute(
             "INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             ("relay_session:" + session[:64], ts),
         )
-    return {"session": session, "workspace": final_ws, "heartbeat_at": ts}
+    return {"session": session, "workspace": final_ws, "heartbeat_at": ts, "display_title": final_display}
+
+
+def set_session_display_title(store: Store, session: str, display_title: str) -> Dict[str, Any]:
+    require(isinstance(session, str) and 1 <= len(session) <= 128, "Invalid session ID")
+    require(isinstance(display_title, str) and 1 <= len(display_title.strip()) <= 120,
+            "Session display_title must be 1-120 non-whitespace characters")
+    safe_display = sanitize(display_title.strip(), privacy_key(store))[0]
+    with store.transaction():
+        updated = store.db.execute(
+            "UPDATE live_sessions SET display_title=? WHERE session=?",
+            (safe_display, session),
+        ).rowcount
+    require(updated > 0, f"Live session not found: {session}")
+    return {"session": session, "display_title": safe_display}
 
 
 def active_live_sessions(store: Store, max_stale_seconds: int = 45) -> List[Dict[str, Any]]:

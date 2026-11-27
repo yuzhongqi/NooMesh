@@ -3,11 +3,12 @@ import unittest
 from pathlib import Path
 
 from local_learning_runtime.clients import hook
-from local_learning_runtime.core import Store, file_digest
+from local_learning_runtime.core import RuntimeErrorBase, Store, file_digest
 from local_learning_runtime.discovery import register_alias
-from local_learning_runtime.inbox import register_live_session
+from local_learning_runtime.inbox import register_live_session, set_session_display_title
 from local_learning_runtime.learning import authorize, forget_workspace, search
-from local_learning_runtime.menubar import (menubar_hits_detail, menubar_item_detail,
+from local_learning_runtime.menubar import (_clean_task_title, humanize_knowledge_title,
+                                            menubar_hits_detail, menubar_item_detail,
                                             menubar_snapshot, open_live_portal,
                                             probe_menubar_running)
 from local_learning_runtime.memos import propose_memo
@@ -432,6 +433,57 @@ class MenuBarDashboardTests(unittest.TestCase):
         )
         self.assertEqual(hit_dns["status"], "FOUND")
         self.assertEqual([m["id"] for m in hit_dns["matches"]], ["emulator-dns-deadlock"])
+
+    def test_human_friendly_titles_for_sessions_and_knowledge_items(self):
+        # 1) Codex wrapper & ADO PR/Bug URL compaction in _clean_task_title
+        codex_raw = (
+            "# Files mentioned by the user\n- /tmp/foo.kt\n"
+            "## My request for Codex:\n"
+            "https://dev.azure.com/org/proj/_git/repo/pullrequest/6092968 pipeline fail fix一下"
+        )
+        self.assertEqual(_clean_task_title(codex_raw), "PR #6092968 pipeline fail fix一下")
+
+        # 2) Machine-generated UI acceptance statement turns into human-readable Chinese summary
+        raw_stmt = (
+            "In this recorded run, the unique enabled UI node "
+            "com.example.app:id/nav_bottom_bar was observed before and after app restart."
+        )
+        self.assertEqual(
+            humanize_knowledge_title(None, raw_stmt, "acceptance-1"),
+            "UI 节点实测校验：nav_bottom_bar 启动前后唯一且可用",
+        )
+
+        # 3) Memo authoring rejects bare URL or raw predicate dump as title
+        with self.assertRaises(RuntimeErrorBase):
+            propose_memo(self.store, {
+                "schema": "llr.memo.v1",
+                "id": "bad-url-title",
+                "workspace": "demo/android",
+                "kind": "trap",
+                "title": "https://example.com/raw/url",
+                "when": "When testing",
+                "rule": "Use human summary title",
+                "trap": "Unreadable URL title",
+                "verification": {
+                    "method": "incident_fix",
+                    "summary": "Checked",
+                    "anchors": [{"path": "Initializer.kt", "sha256": file_digest(self.anchor_file)}],
+                },
+            }, expected_version=0, approve=True)
+
+        # 4) Curated session display_title persists across subsequent short follow-up prompts
+        register_live_session(self.store, "sess-curated-1", "copilot", str(self.android_repo), "初始输入")
+        set_session_display_title(
+            self.store, "sess-curated-1",
+            "Android 模拟器没网：原因系残留旧 netsimd 与私人 DNS 死锁",
+        )
+        register_live_session(self.store, "sess-curated-1", "copilot", str(self.android_repo), "继续", state="active")
+        snap = menubar_snapshot(self.store)
+        matched_sess = next(s for s in snap["live_sessions"] if s["session"] == "sess-curated-1")
+        self.assertEqual(
+            matched_sess["title"],
+            "Android 模拟器没网：原因系残留旧 netsimd 与私人 DNS 死锁",
+        )
 
 
 if __name__ == "__main__":

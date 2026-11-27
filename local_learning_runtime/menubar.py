@@ -3,14 +3,16 @@
 import json
 import os
 import plistlib
+import re
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .core import (RuntimeErrorBase, Store, canonical, file_digest, now,
                    require, require_private_location, verify_anchor, workspace_file)
@@ -85,14 +87,151 @@ def relative_time_zh(iso_value: Optional[str], clock: datetime) -> str:
     return f"{days}天前"
 
 
+_FOLLOWUP_PREFIXES = (
+    "为什么", "那你", "你可以", "你在", "目前进度", "如果", "请继续", "继续", "需要", "好的", "ok",
+)
+
+
 def _clean_task_title(raw_title: str) -> str:
     if not raw_title:
         return ""
     text = str(raw_title).strip()
     if text.startswith("<system_notification>"):
         return ""
-    first_line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
-    return first_line[:96]
+    # Unwrap Codex attachment preamble to extract the user's actual request
+    marker = "## My request for Codex:"
+    if marker in text:
+        text = text.split(marker, 1)[1].strip()
+    elif text.startswith("# Files mentioned by the user"):
+        lines_after = [
+            ln for ln in text.splitlines()[1:]
+            if ln.strip() and not ln.lstrip().startswith(("-", "*"))
+        ]
+        text = "\n".join(lines_after).strip()
+
+    # Convert markdown links [label](url) -> label
+    text = re.sub(r"\[([^\]]+)\]\(https?://[^)\s]+\)", r"\1", text)
+    # Compact Azure DevOps / GitHub PR, WorkItem, and Incident URLs into crisp human badges
+    text = re.sub(r"https?://[^\s)>]+/pullrequest/(\d+)[^\s)>]*", r"PR #\1 ", text, flags=re.I)
+    text = re.sub(r"https?://github\.com/[^/\s]+/[^/\s]+/pull/(\d+)[^\s)>]*", r"PR #\1 ", text, flags=re.I)
+    text = re.sub(r"https?://[^\s)>]+/_workitems/edit/(\d+)[^\s)>]*", r"Bug #\1 ", text, flags=re.I)
+    text = re.sub(r"https?://[^\s)>]+/incidents/details/(\d+)[^\s)>]*", r"IcM #\1 ", text, flags=re.I)
+    # Strip remaining bare URLs so long URLs never swallow the human summary
+    text = re.sub(r"https?://\S+", " ", text)
+    # Strip markdown emphasis/code/heading noise
+    text = re.sub(r"[*_`]+", "", text)
+
+    chosen = ""
+    for raw_ln in text.splitlines():
+        ln = re.sub(r"^(?:#{1,6}\s+|>\s+|[-•]\s+)", "", raw_ln.strip())
+        ln = re.sub(r"###\s*", " ", ln)
+        ln = re.sub(r"\s+", " ", ln).strip(" ，,。:：|-")
+        if len(ln) >= 2:
+            chosen = ln
+            break
+    return chosen[:96]
+
+
+def humanize_knowledge_title(raw_title: Optional[str], statement: str = "",
+                             fallback_id: str = "") -> str:
+    candidate = str(raw_title or "").strip()
+    stmt = str(statement or "").strip()
+    probe = candidate or stmt
+    ui_match = re.search(
+        r"unique enabled UI node\s+(?:[A-Za-z0-9_.]+:id/)?([A-Za-z0-9_.-]+)",
+        probe,
+        re.I,
+    )
+    if ui_match and (not candidate or candidate.lower().startswith("in this recorded run")):
+        view_id = ui_match.group(1)
+        return f"UI 节点实测校验：{view_id} 启动前后唯一且可用"
+    if not candidate and stmt.lower().startswith("recorded runtime predicates"):
+        return f"运行时断言实测：{fallback_id[:28]}"
+    if candidate.lower().startswith("user-authorized "):
+        candidate = candidate[len("User-authorized "):].strip()
+    return re.sub(r"\s+", " ", candidate or stmt or fallback_id)[:240]
+
+
+def _ide_session_titles(session_ids: Iterable[str]) -> Dict[str, str]:
+    sids = [s for s in session_ids if s]
+    if not sids:
+        return {}
+    resolved: Dict[str, str] = {}
+    copilot_base = Path.home() / ".copilot" / "session-state"
+    if copilot_base.is_dir():
+        for sid in sids:
+            sdir = copilot_base / sid
+            if not sdir.is_dir():
+                continue
+            ws_yaml = sdir / "workspace.yaml"
+            yaml_title = ""
+            if ws_yaml.is_file():
+                try:
+                    lines = ws_yaml.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    for idx, ln in enumerate(lines):
+                        if ln.startswith("name:"):
+                            rest = ln[5:].strip().strip("'\"")
+                            if rest in ("|-", "|", ">-", ">", ""):
+                                block = []
+                                for sub in lines[idx + 1:]:
+                                    if sub.startswith("  "):
+                                        block.append(sub.strip())
+                                    else:
+                                        break
+                                yaml_title = _clean_task_title("\n".join(block))
+                            else:
+                                yaml_title = _clean_task_title(rest)
+                            break
+                except OSError:
+                    pass
+            cp_index = sdir / "checkpoints" / "index.md"
+            cp_title = ""
+            if cp_index.is_file():
+                try:
+                    rows = [
+                        ln.strip() for ln in cp_index.read_text(encoding="utf-8", errors="ignore").splitlines()
+                        if ln.strip().startswith("|") and not ln.strip().startswith("|---")
+                    ]
+                    if len(rows) >= 2:
+                        cols = [c.strip() for c in rows[-1].strip("|").split("|")]
+                        if len(cols) >= 2 and cols[1].lower() != "title":
+                            cp_title = _clean_task_title(cols[1])
+                except OSError:
+                    pass
+            if yaml_title:
+                resolved[sid] = yaml_title
+            elif cp_title:
+                resolved[sid] = cp_title
+
+    codex_db = Path.home() / ".codex" / "state_5.sqlite"
+    missing = [s for s in sids if s not in resolved]
+    if missing and codex_db.is_file():
+        try:
+            conn = sqlite3.connect(f"file:{codex_db}?mode=ro", uri=True, timeout=0.5)
+            try:
+                placeholders = ",".join("?" for _ in missing)
+                for row in conn.execute(
+                    f"SELECT id, coalesce(nullif(name,''), title, first_user_message) "
+                    f"FROM threads WHERE id IN ({placeholders})",
+                    missing,
+                ):
+                    cleaned = _clean_task_title(row[1] or "")
+                    if cleaned:
+                        resolved[row[0]] = cleaned
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            pass
+    return resolved
+
+
+def _is_context_free_followup(title: str) -> bool:
+    if not title:
+        return True
+    low = title.strip().lower()
+    if len(low) <= 10:
+        return True
+    return any(low.startswith(p) for p in _FOLLOWUP_PREFIXES)
 
 
 def _knowledge_title_catalog(store: Store) -> Dict[Tuple[str, str], Dict[str, str]]:
@@ -101,9 +240,10 @@ def _knowledge_title_catalog(store: Store) -> Dict[Tuple[str, str], Dict[str, st
         try:
             body = json.loads(row["body"])
             spec = body["spec"]
-            title = spec.get("provenance", {}).get("title") or spec["statement"]
+            raw_t = spec.get("provenance", {}).get("title")
+            title = humanize_knowledge_title(raw_t, spec["statement"], row["id"])
             lookup[("claim", row["id"])] = {
-                "title": str(title)[:240],
+                "title": title,
                 "workspace": spec["workspace"],
                 "lifecycle": body.get("lifecycle", "active"),
             }
@@ -113,7 +253,7 @@ def _knowledge_title_catalog(store: Store) -> Dict[Tuple[str, str], Dict[str, st
         try:
             spec = json.loads(row["body"])
             lookup[("memo", row["id"])] = {
-                "title": str(spec.get("title", row["id"]))[:240],
+                "title": humanize_knowledge_title(spec.get("title"), "", row["id"]),
                 "workspace": row["workspace"],
                 "lifecycle": row["lifecycle"],
                 "memo_kind": spec.get("kind", "rule"),
@@ -124,7 +264,7 @@ def _knowledge_title_catalog(store: Store) -> Dict[Tuple[str, str], Dict[str, st
         try:
             spec = json.loads(row["body"])
             lookup[("solution", row["id"])] = {
-                "title": str(spec.get("problem", {}).get("goal", row["id"]))[:240],
+                "title": humanize_knowledge_title(spec.get("problem", {}).get("goal"), "", row["id"]),
                 "workspace": row["workspace"],
                 "lifecycle": row["lifecycle"],
             }
@@ -230,19 +370,25 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             except ValueError:
                 pass
 
-    # Map session -> distinct used knowledge items
+    # Map session -> distinct used knowledge items (merge paired Memo + Claim of the same rule)
     session_knowledge: Dict[str, List[Dict[str, Any]]] = {}
+    seen_session_pairs: Dict[str, set] = {}
     for row in store.db.execute(
         "SELECT id,session,workspace,kind,subject,event,occurred_at FROM memory_events "
         "WHERE event IN ('retrieved','expanded','selected','executed') "
-        "ORDER BY occurred_at DESC, id ASC LIMIT 200"
+        "ORDER BY occurred_at DESC, id ASC LIMIT 240"
     ):
         sid = row["session"]
-        items = session_knowledge.setdefault(sid, [])
-        if len(items) >= 4 or any(x["subject"] == row["subject"] and x["kind"] == row["kind"] for x in items):
+        pair_Set = seen_session_pairs.setdefault(sid, set())
+        exact_pair = (row["kind"], row["subject"])
+        if exact_pair in pair_Set:
             continue
-        meta = lookup.get((row["kind"], row["subject"]), {})
-        prof = tok_profiles.get((row["kind"], row["subject"])) or fallback_profile(
+        pair_Set.add(exact_pair)
+
+        items = session_knowledge.setdefault(sid, [])
+        meta = lookup.get(exact_pair, {})
+        item_title = meta.get("title", row["subject"])[:160]
+        prof = tok_profiles.get(exact_pair) or fallback_profile(
             row["kind"], row["subject"], row["workspace"]
         )
         ev_tok = ev_savings.get(row["id"], {})
@@ -251,11 +397,33 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             ev_tok.get("saved_tokens", prof["saved_per_hit"]),
         ))
         acq_val = int(prof["acquisition_tokens"])
+        stem = row["subject"][:-6] if row["subject"].endswith("-claim") else row["subject"]
+
+        existing_match = next(
+            (
+                x for x in items
+                if (x["subject"][:-6] if x["subject"].endswith("-claim") else x["subject"]) == stem
+                or x["title"] == item_title
+            ),
+            None,
+        )
+        if existing_match is not None:
+            combined_saved = int(existing_match["saved_tokens"]) + saved_val
+            existing_match["saved_tokens"] = combined_saved
+            existing_match["saved_formatted"] = format_tokens(combined_saved)
+            if row["kind"] == "memo" and existing_match["kind"] != "memo":
+                existing_match["kind"] = "memo"
+                existing_match["subject"] = row["subject"]
+                existing_match["title"] = item_title
+            continue
+
+        if len(items) >= 4:
+            continue
         items.append({
             "kind": row["kind"],
             "subject": row["subject"],
             "workspace": row["workspace"] or meta.get("workspace", ""),
-            "title": meta.get("title", row["subject"])[:160],
+            "title": item_title,
             "event": row["event"],
             "time_ago": relative_time_zh(row["occurred_at"], clock),
             "saved_tokens": saved_val,
@@ -267,23 +435,34 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
     # Live open sessions: filter heartbeat freshness BEFORE sorting/limiting, and sort deterministically
     # by active state -> last real interaction (updated_at) -> session ID (never by jittery heartbeat_at!).
     hb_cutoff_iso = (clock - timedelta(seconds=90)).isoformat()
-    sessions_out: List[Dict[str, Any]] = []
-    seen_sessions = set()
-    for row in store.db.execute(
+    live_rows = store.db.execute(
         "SELECT * FROM live_sessions WHERE heartbeat_at >= ? "
         "ORDER BY CASE WHEN state='active' THEN 0 ELSE 1 END, updated_at DESC, session ASC LIMIT 20",
         (hb_cutoff_iso,),
-    ):
+    ).fetchall()
+    ide_titles = _ide_session_titles([r["session"] for r in live_rows])
+
+    sessions_out: List[Dict[str, Any]] = []
+    seen_sessions = set()
+    for row in live_rows:
         hb = parsed(row["heartbeat_at"])
         if not hb or (clock - hb).total_seconds() > 90:
             continue
         sid = row["session"]
         seen_sessions.add(sid)
+        curated_display = str(row["display_title"] or "").strip() if "display_title" in row.keys() else ""
         raw_live_title = _clean_task_title(row["title"])
-        title = (
-            raw_live_title if len(raw_live_title) > 6
-            else session_titles.get(sid) or session_queries.get(sid) or raw_live_title or "等待新任务输入..."
-        )
+        ide_topic = ide_titles.get(sid, "")
+        if curated_display:
+            title = curated_display
+        elif _is_context_free_followup(raw_live_title) and ide_topic:
+            title = ide_topic
+        else:
+            title = (
+                raw_live_title if len(raw_live_title) > 6
+                else ide_topic or session_titles.get(sid) or session_queries.get(sid) or raw_live_title or "等待新任务输入..."
+            )
+        session_titles[sid] = title
         client_raw = row["client"]
         client_label = "Codex" if "codex" in client_raw else "VS Code"
         ws_label = row["workspace"] or ("/".join(Path(row["cwd"]).parts[-2:]) if row["cwd"] else "未绑定目录")
@@ -533,7 +712,7 @@ def menubar_item_detail(store: Store, kind: str, subject: str,
         lifecycle = str(claim_obj.get("lifecycle", "active"))
         prov = spec.get("provenance", {})
         updated_at_iso = str(prov.get("validated_at", ""))
-        title = str(prov.get("title") or spec["statement"][:96])
+        title = humanize_knowledge_title(prov.get("title"), spec["statement"], subject)
         tags = [f"类型: {spec.get('task_type', 'general')}"]
         if prov.get("kind"):
             tags.append(f"来源: {prov['kind']}")
@@ -824,13 +1003,21 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
             fallback_short_titles[sid] = cleaned
         if sid not in session_titles and len(cleaned) > 6:
             session_titles[sid] = cleaned
-    for row in store.db.execute("SELECT session,title FROM live_sessions"):
+    for row in store.db.execute("SELECT session,title,display_title FROM live_sessions"):
         sid = row["session"]
+        curated = str(row["display_title"] or "").strip()
+        if curated:
+            session_titles[sid] = curated
+            continue
         cleaned = _clean_task_title(row["title"])
         if cleaned and len(cleaned) > 6 and sid not in session_titles:
             session_titles[sid] = cleaned
     for sid, short_val in fallback_short_titles.items():
         session_titles.setdefault(sid, short_val)
+    ide_for_hits = _ide_session_titles(list(session_titles.keys()))
+    for sid, ide_val in ide_for_hits.items():
+        if sid not in session_titles or _is_context_free_followup(session_titles[sid]):
+            session_titles[sid] = ide_val
 
     # Session retrieval receipts for matching search queries near event timestamp
     session_receipts: Dict[str, List[Tuple[datetime, str]]] = {}

@@ -24,6 +24,11 @@ def validate_memo(store: Store, spec: Dict[str, Any]) -> None:
         value = spec[field]
         require(isinstance(value, str) and 0 < len(value.strip()) <= limit,
                 f"Memo {field} must be 1-{limit} non-whitespace characters")
+    title_clean = spec["title"].strip()
+    require(not title_clean.lower().startswith(("http://", "https://"))
+            and "recorded runtime predicates" not in title_clean.lower()
+            and not title_clean.startswith(("[{" , "{\"")),
+            "Memo title must be a human-readable summary (<phenomenon/scenario>: <cause/rule>), not a URL or raw predicate dump")
     if "tags" in spec:
         tags = spec["tags"]
         require(isinstance(tags, list) and len(tags) <= 16

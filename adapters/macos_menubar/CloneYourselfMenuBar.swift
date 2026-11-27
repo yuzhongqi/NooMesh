@@ -1078,30 +1078,36 @@ struct SessionKnowledgeRowButton: View {
             let ws = (item.workspace?.isEmpty == false) ? item.workspace : fallbackWorkspace
             onSelect(item.kind, item.subject, ws, item.title)
         }) {
-            HStack(spacing: 5.5) {
+            HStack(alignment: .top, spacing: 5.5) {
                 KnowledgeKindTag(kind: item.kind)
+                    .padding(.top, 1)
                 Text(item.title)
                     .font(.system(size: 11))
                     .foregroundColor(GlassPalette.primaryLabel)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
-                if let saved = item.saved_formatted {
-                    Text("省 ~\(saved)")
-                        .font(.system(size: 9.5, weight: .medium, design: .rounded).monospacedDigit())
-                        .foregroundColor(GlassPalette.secondaryLabel)
-                        .padding(.horizontal, 5.5)
-                        .padding(.vertical, 1.5)
-                        .background(
-                            Capsule()
-                                .fill(GlassPalette.microCapsuleFill(colorScheme))
-                        )
+                HStack(spacing: 4.5) {
+                    if let saved = item.saved_formatted {
+                        Text("省 ~\(saved)")
+                            .font(.system(size: 9.5, weight: .medium, design: .rounded).monospacedDigit())
+                            .foregroundColor(GlassPalette.secondaryLabel)
+                            .padding(.horizontal, 5.5)
+                            .padding(.vertical, 1.5)
+                            .background(
+                                Capsule()
+                                    .fill(GlassPalette.microCapsuleFill(colorScheme))
+                            )
+                    }
+                    Text(item.time_ago)
+                        .font(.system(size: 10))
+                        .foregroundColor(GlassPalette.tertiaryLabel)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundColor(isHovering ? GlassPalette.primaryLabel : GlassPalette.tertiaryLabel)
                 }
-                Text(item.time_ago)
-                    .font(.system(size: 10))
-                    .foregroundColor(GlassPalette.tertiaryLabel)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8.5, weight: .semibold))
-                    .foregroundColor(isHovering ? GlassPalette.primaryLabel : GlassPalette.tertiaryLabel)
+                .padding(.top, 1)
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 3.5)

@@ -26,7 +26,7 @@ from .clients import (hook, install_copilot, install_codex, install_codex_hooks,
                       codex_notify, setup_client, doctor)
 from .mcp import serve
 from .inbox import (claim_proactive_message, configure_inbox, inbox_status,
-                    poll_proactive_inbox, register_live_session)
+                    poll_proactive_inbox, register_live_session, set_session_display_title)
 from .menubar import (menubar_hits_detail, menubar_item_detail, menubar_snapshot,
                       open_live_portal, probe_menubar_running, start_menubar, stop_menubar)
 from .memos import invalidate_memo, propose_memo
@@ -366,6 +366,9 @@ def parser() -> argparse.ArgumentParser:
     mb_portal = commands.add_parser("menubar-open-portal")
     mb_portal.add_argument("--workspace")
     mb_portal.add_argument("--no-open", action="store_true")
+    sess_title = commands.add_parser("session-title")
+    sess_title.add_argument("--session", required=True)
+    sess_title.add_argument("--title", required=True)
     acceptance = commands.add_parser("acceptance-android")
     acceptance.add_argument("--workspace", required=True)
     acceptance.add_argument("--device", required=True)
@@ -621,6 +624,8 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
                             uninstall_login=args.uninstall_login_agent)
     if args.command == "menubar-open-portal":
         return open_live_portal(store, workspace=args.workspace, open_browser=not args.no_open)
+    if args.command == "session-title":
+        return set_session_display_title(store, args.session, args.title)
     if args.command == "acceptance-android":
         return android_acceptance(store, args.workspace, args.device, args.app, args.resource_id,
                                   read_json(args.context), args.output, args.approve)
@@ -704,7 +709,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             serve_bridge(args.home)
             return 0
         elif args.command in ("menubar-snapshot", "menubar-hits", "menubar-item", "menubar-status",
-                              "menubar-start", "menubar-stop", "menubar-open-portal"):
+                              "menubar-start", "menubar-stop", "menubar-open-portal", "session-title"):
             store = Store(args.home)
             try:
                 output = dispatch(store, args)

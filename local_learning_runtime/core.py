@@ -313,7 +313,8 @@ class Store:
                 title TEXT NOT NULL DEFAULT '',
                 state TEXT NOT NULL DEFAULT 'idle',
                 heartbeat_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL);
+                updated_at TEXT NOT NULL,
+                display_title TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS proactive_inbox (
                 message_id TEXT PRIMARY KEY,
                 target_session TEXT NOT NULL,
@@ -336,6 +337,10 @@ class Store:
         trace_cols = {row["name"] for row in self.db.execute("PRAGMA table_info(tool_traces)")}
         if "detail" not in trace_cols:
             self.db.execute("ALTER TABLE tool_traces ADD COLUMN detail TEXT NOT NULL DEFAULT ''")
+            self.db.commit()
+        live_cols = {row["name"] for row in self.db.execute("PRAGMA table_info(live_sessions)")}
+        if "display_title" not in live_cols:
+            self.db.execute("ALTER TABLE live_sessions ADD COLUMN display_title TEXT NOT NULL DEFAULT ''")
             self.db.commit()
 
     def close(self) -> None:

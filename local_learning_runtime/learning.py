@@ -420,8 +420,7 @@ def relevance_score(query_terms: set, doc_terms: set,
     if len(specific_query) >= 4 and len(specific_overlap) == 1:
         sole = next(iter(specific_overlap))
         is_identifier = len(sole) >= 9 or "_" in sole
-        in_header = bool(header_terms and sole in header_terms)
-        if not (is_identifier or in_header):
+        if not is_identifier:
             return 0
     header_bonus = len(specific_overlap & header_terms) if header_terms else 0
     return len(overlap) + header_bonus
