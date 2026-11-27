@@ -401,7 +401,7 @@ def export_portal(store: Store, workspace: str, output: Path) -> Dict[str, Any]:
 <meta http-equiv="Content-Security-Policy"
 content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>本地学习 · 知识与验证</title><style>
+<title>NooMesh · 本地知识与验证</title><style>
 :root{color-scheme:light}*{box-sizing:border-box}
 body{font:16px/1.7 system-ui,sans-serif;margin:0;background:#f4f6fa;color:#24324a}
 main{max-width:1050px;margin:auto;padding:32px 20px}
@@ -421,7 +421,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;p
 .table-scroll{overflow-x:auto}td{overflow-wrap:anywhere}img{max-width:100%}
 @media(max-width:600px){h1{font-size:24px}.card{padding:16px}dl{grid-template-columns:1fr}dd{margin-bottom:8px}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.stat{padding:10px;font-size:12px}.stat b{font-size:24px}}
-</style></head><body><main><h1>本地学习 · 知识与验证</h1>"""
+</style></head><body><main><h1>NooMesh · 本地知识与验证</h1>"""
     page += '<p class="muted">' + escaped(workspace) + " · 私人离线知识快照</p>"
     page += ("<p>这里回答三个问题：我们验证了什么？哪些只是历史线索？下一次能否直接使用？</p>"
              '<div class="stats"><div class="stat"><b>' + str(len(data["claims"]))

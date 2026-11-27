@@ -1,15 +1,19 @@
-# Clone Yourself
+# NooMesh
 
-> Your experience. Every session.
+**NooMesh — Human-readable doctrine. Machine-executable contracts. One session across every Mac and agent.**
 
-A local-first experience agent that helps your coding sessions build on what
-you have already learned and verified - instead of starting from scratch.
+> 人读其理，机执其法；一个会话，统御多机 Agent 共享每一次实战积累。
+
+A local-first experience engine and cross-agent command mesh that turns what
+you have already debugged and verified into dual-layer doctrine: crystal-clear
+human titles on top, symbol-anchored contracts and zero-model procedures underneath.
 
 ## What this repository does
 
-**Clone Yourself gives your existing coding agents a shared, private experience
-layer on your machine.** It is a headless service, not another chat app or a
-replacement for VS Code, Codex, or your chosen model.
+**NooMesh gives your coding agents (VS Code Copilot, Codex, CLI, and beyond) a
+shared, visible, private experience layer across your machines.** It is a
+headless service with a native macOS Liquid Glass HUD and Teams mobile session
+relay—not another standalone chat silo.
 
 An approved task verification can become durable local knowledge. A complete
 solution memo records the problem, prerequisites, fixed steps, success checks,
@@ -330,8 +334,8 @@ conditions and remote changes still require explicit collectors and verification
 
 ```sh
 mkdir -p "$HOME/Developer"
-git clone https://github.com/yuzhongqi/clone-yourself.git "$HOME/Developer/clone-yourself"
-cd "$HOME/Developer/clone-yourself"
+git clone https://github.com/yuzhongqi/NooMesh.git "$HOME/Developer/NooMesh"
+cd "$HOME/Developer/NooMesh"
 ```
 
 不要把 GitHub 密码、认证器验证码或 token 写入命令、仓库和知识文件。
@@ -479,7 +483,7 @@ llr context --cwd "$PROJECT_ROOT" --query "Android" --session install-check --le
 
 ```sh
 llr host-stop
-cd "$HOME/Developer/clone-yourself"
+cd "$HOME/Developer/NooMesh"
 git pull --ff-only
 python -m pip install --upgrade .
 llr host-status
@@ -669,7 +673,7 @@ workspace、凭据环境变量及经过外部核实的 hard cap 后才可发送�
 现有 `export-portal` 继续从本地库生成人可读 HTML 和 agent JSON，并包含解决
 contract、任务和学习 mission 状态。在 macOS 上还可通过
 `llr menubar-start --install-login-agent --approve` 启动右上角状态栏原生面板
-（[CloneYourselfMenuBar.swift](adapters/macos_menubar/CloneYourselfMenuBar.swift)，无 Dock 图标、
+（[NooMeshMenuBar.swift](adapters/macos_menubar/NooMeshMenuBar.swift)，无 Dock 图标、
 单实例 `flock` 锁、只读直连 SQLite 不重置 Host 10 分钟空闲休眠计时器），实时查看当前活跃任务调用了哪些
 本地 `Memo` / `Claim` / `P/R/Q 契约` 并一键打开 HTML 知识门户或触发离线巡检整理。
 memo、graph、index 不是三份可独立编辑的事实。
@@ -1137,7 +1141,7 @@ redact any internal data before sending it to an approved provider.
 从任意工作目录调用仓库自带 launcher，无需先 `cd` 到 runtime 或安装 Python 包：
 
 ```sh
-python3 /absolute/path/clone-yourself/tools/llr.py \
+python3 /absolute/path/NooMesh/tools/llr.py \
   discover --cwd /absolute/path/to/project --session unique-session-id
 ```
 
@@ -1153,7 +1157,7 @@ python3 /absolute/path/clone-yourself/tools/llr.py \
 可显式登记包含原 checkout 的父目录别名，保持源码锚点根目录不变：
 
 ```sh
-python3 /absolute/path/clone-yourself/tools/llr.py register-alias \
+python3 /absolute/path/NooMesh/tools/llr.py register-alias \
   --workspace sample/android --root /absolute/path/to/project-root \
   --require-platform --approve
 ```
@@ -1164,7 +1168,7 @@ iOS/苹果时消歧；未提平台、同时提两个平台时不会默选。别�
 终端 CLI 从子目录成功，不代表 App 从项目根目录也能成功。
 
 ```sh
-python3 /absolute/path/clone-yourself/tools/llr.py \
+python3 /absolute/path/NooMesh/tools/llr.py \
   catalog --workspace RETURNED_WORKSPACE
 ```
 
@@ -1334,11 +1338,11 @@ knowledge.
 
 ```sh
 python3 -m local_learning_runtime install-client copilot \
-  --runtime-root /absolute/clone-yourself --profile ~/.copilot --approve
+  --runtime-root /absolute/NooMesh --profile ~/.copilot --approve
 python3 -m local_learning_runtime install-client codex \
-  --runtime-root /absolute/clone-yourself --profile ~/.codex --approve
+  --runtime-root /absolute/NooMesh --profile ~/.codex --approve
 python3 -m local_learning_runtime install-client codex-hooks \
-  --runtime-root /absolute/clone-yourself --profile ~/.codex --approve
+  --runtime-root /absolute/NooMesh --profile ~/.codex --approve
 ```
 
 | Client path | Actual integration | Guarantee boundary |

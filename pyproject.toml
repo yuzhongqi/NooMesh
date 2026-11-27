@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "local-learning-runtime"
 version = "0.4.1"
-description = "Headless personal experience agent: shared memory, verified solutions and bounded learning"
+description = "NooMesh — Human-readable doctrine. Machine-executable contracts. One session across every Mac and agent."
 requires-python = ">=3.9"
 dependencies = []
 

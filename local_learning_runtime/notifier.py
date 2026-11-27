@@ -439,7 +439,7 @@ def send_test_notification(store: Store, approve: bool) -> Dict[str, Any]:
     require(approve, "Explicit approval required to send a live test notification")
     payload = build_teams_payload(
         store, "manual-test", None, 42.0, "READY",
-        "Clone Yourself Teams Workflows notification is connected.", "test_ping")
+        "NooMesh Teams Workflows notification is connected.", "test_ping")
     return _deliver_sync(store, payload, timeout=8.0)
 
 

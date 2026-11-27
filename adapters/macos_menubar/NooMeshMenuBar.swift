@@ -2149,7 +2149,7 @@ struct DashboardPopoverView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("Clone Yourself")
+                        Text("NooMesh")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(GlassPalette.primaryLabel)
                         if let ws = vm.snapshot?.primary_workspace {
@@ -2338,7 +2338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let symbolCfg = NSImage.SymbolConfiguration(pointSize: 13.5, weight: .medium)
             let img = NSImage(
                 systemSymbolName: "brain.head.profile",
-                accessibilityDescription: "Clone Yourself 本地知识状态"
+                accessibilityDescription: "NooMesh 本地知识状态"
             )?.withSymbolConfiguration(symbolCfg)
             img?.isTemplate = true
             button.image = img
@@ -2346,7 +2346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
             button.target = self
             button.action = #selector(togglePanel(_:))
-            button.toolTip = "Clone Yourself · 本地知识实时状态"
+            button.toolTip = "NooMesh · 本地知识实时状态"
         }
 
         buildFloatingGlassPanel()
@@ -2412,7 +2412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else {
             button.title = ""
         }
-        button.toolTip = "Clone Yourself · 累计净省 ~\(snap.gas_gauge.total_saved_formatted) Tokens (24h +\(snap.gas_gauge.today_saved_formatted)) · 24h 命中 \(hits) 次 · \(active) 个会话执行中"
+        button.toolTip = "NooMesh · 累计净省 ~\(snap.gas_gauge.total_saved_formatted) Tokens (24h +\(snap.gas_gauge.today_saved_formatted)) · 24h 命中 \(hits) 次 · \(active) 个会话执行中"
     }
 
     @objc private func togglePanel(_ sender: AnyObject?) {
@@ -2529,7 +2529,7 @@ private func acquireSingleInstanceLock(homePath: String) -> Bool {
 }
 
 @main
-struct CloneYourselfMenuBarMain {
+struct NooMeshMenuBarMain {
     static func main() {
         let cli = RuntimeCLI.parseFromCommandLine()
         guard acquireSingleInstanceLock(homePath: cli.homePath) else {

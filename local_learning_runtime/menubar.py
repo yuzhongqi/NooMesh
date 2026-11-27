@@ -23,7 +23,8 @@ from .notifier import default_machine_name, load_notifier_config
 from .relay import load_relay_config
 from .tokens import build_token_profiles, evaluate_hit_events, fallback_profile, format_tokens
 
-LAUNCH_AGENT_LABEL = "com.cloneyourself.menubar"
+LAUNCH_AGENT_LABEL = "com.noomesh.menubar"
+LEGACY_LAUNCH_AGENT_LABEL = "com.cloneyourself.menubar"
 
 
 def _lock_held(lock_file: Path) -> bool:
@@ -1272,7 +1273,7 @@ def open_live_portal(store: Store, workspace: Optional[str] = None,
 
 def swift_source_path(runtime_root: Optional[Path] = None) -> Path:
     base = (runtime_root or Path(__file__).resolve().parents[1]).resolve()
-    src = base / "adapters" / "macos_menubar" / "CloneYourselfMenuBar.swift"
+    src = base / "adapters" / "macos_menubar" / "NooMeshMenuBar.swift"
     require(src.is_file(), f"Menu bar Swift source missing: {src}")
     return src
 
@@ -1283,17 +1284,17 @@ def build_macos_menubar_app(home: Path, runtime_root: Optional[Path] = None) -> 
     require_private_location(home)
     src = swift_source_path(runtime_root)
     src_sha = file_digest(src)
-    app_dir = home / "app" / "CloneYourselfMenuBar.app" / "Contents"
+    app_dir = home / "app" / "NooMeshMenuBar.app" / "Contents"
     macos_dir = app_dir / "MacOS"
     macos_dir.mkdir(parents=True, exist_ok=True)
-    binary = macos_dir / "CloneYourselfMenuBar"
+    binary = macos_dir / "NooMeshMenuBar"
     stamp_file = app_dir / "build.sha256"
     info_plist = app_dir / "Info.plist"
     plist_data = {
-        "CFBundleExecutable": "CloneYourselfMenuBar",
+        "CFBundleExecutable": "NooMeshMenuBar",
         "CFBundleIdentifier": LAUNCH_AGENT_LABEL,
-        "CFBundleName": "Clone Yourself",
-        "CFBundleDisplayName": "Clone Yourself",
+        "CFBundleName": "NooMesh",
+        "CFBundleDisplayName": "NooMesh",
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "0.4.1",
         "CFBundleVersion": "1",
@@ -1335,6 +1336,9 @@ def install_launch_agent(home: Path, binary: Path,
                          runtime_root: Optional[Path] = None) -> Path:
     agents_dir = Path.home() / "Library" / "LaunchAgents"
     agents_dir.mkdir(parents=True, exist_ok=True)
+    legacy_plist = agents_dir / (LEGACY_LAUNCH_AGENT_LABEL + ".plist")
+    if legacy_plist.is_file():
+        legacy_plist.unlink()
     plist_path = agents_dir / (LAUNCH_AGENT_LABEL + ".plist")
     argv = _launcher_command_args(home, binary, runtime_root)
     plist_body = {
@@ -1351,11 +1355,13 @@ def install_launch_agent(home: Path, binary: Path,
 
 
 def uninstall_launch_agent() -> bool:
-    plist_path = Path.home() / "Library" / "LaunchAgents" / (LAUNCH_AGENT_LABEL + ".plist")
-    if plist_path.is_file():
-        plist_path.unlink()
-        return True
-    return False
+    removed = False
+    for label in (LAUNCH_AGENT_LABEL, LEGACY_LAUNCH_AGENT_LABEL):
+        plist_path = Path.home() / "Library" / "LaunchAgents" / (label + ".plist")
+        if plist_path.is_file():
+            plist_path.unlink()
+            removed = True
+    return removed
 
 
 def _set_menubar_policy_flag(home: Path, enabled: bool) -> None:
@@ -1420,7 +1426,7 @@ def ensure_menubar_if_enabled(home: Path) -> None:
             return
         if probe_menubar_running(home)["running"]:
             return
-        binary = home / "app" / "CloneYourselfMenuBar.app" / "Contents" / "MacOS" / "CloneYourselfMenuBar"
+        binary = home / "app" / "NooMeshMenuBar.app" / "Contents" / "MacOS" / "NooMeshMenuBar"
         if not binary.is_file() or not os.access(binary, os.X_OK):
             return
         argv = _launcher_command_args(home, binary)
