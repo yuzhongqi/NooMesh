@@ -2,15 +2,51 @@
 // Bidirectional Microsoft Teams Workflows remote relay for continuing VS Code Copilot sessions and mobile choices
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { joinSession } from "@github/copilot-sdk/extension";
 
-const XCODE_PYTHON = "/Applications/Xcode_26.4.1.app/Contents/Developer/usr/bin/python3";
-const PYTHON_BIN = process.env.LLR_PYTHON || (existsSync(XCODE_PYTHON) ? XCODE_PYTHON : "python3");
-const LLR_SCRIPT = process.env.LLR_SCRIPT || join(homedir(), "local-learning-runtime", "tools", "llr.py");
-const LLR_HOME = process.env.LLR_HOME || join(homedir(), ".local-learning-runtime");
+function resolveRuntimePaths() {
+    const home = homedir();
+    const mcpCfgPath = join(home, ".copilot", "mcp-config.json");
+    if (existsSync(mcpCfgPath)) {
+        try {
+            const cfg = JSON.parse(readFileSync(mcpCfgPath, "utf-8"));
+            const srv = cfg?.mcpServers?.local_learning;
+            if (srv?.command && Array.isArray(srv?.args) && srv.args.length >= 1) {
+                const homeIdx = srv.args.indexOf("--home");
+                const parsedHome = homeIdx >= 0 && srv.args[homeIdx + 1] ? srv.args[homeIdx + 1] : null;
+                return {
+                    pythonBin: srv.command,
+                    llrScript: srv.args[0],
+                    llrHome: parsedHome || join(home, ".local-learning-runtime"),
+                };
+            }
+        } catch {
+            // Fall through to standard paths
+        }
+    }
+    const xcodePy = "/Applications/Xcode_26.4.1.app/Contents/Developer/usr/bin/python3";
+    const venvPy = join(home, ".local", "share", "noomesh", "venv", "bin", "python");
+    const py = existsSync(venvPy) ? venvPy : existsSync(xcodePy) ? xcodePy : "python3";
+    const scriptCandidates = [
+        join(home, "Developer", "NooMesh", "tools", "llr.py"),
+        join(home, "NooMesh", "tools", "llr.py"),
+        join(home, "local-learning-runtime", "tools", "llr.py"),
+    ];
+    const script = scriptCandidates.find((p) => existsSync(p)) || scriptCandidates[0];
+    return {
+        pythonBin: py,
+        llrScript: script,
+        llrHome: join(home, ".local-learning-runtime"),
+    };
+}
+
+const RESOLVED_PATHS = resolveRuntimePaths();
+const PYTHON_BIN = process.env.LLR_PYTHON || RESOLVED_PATHS.pythonBin;
+const LLR_SCRIPT = process.env.LLR_SCRIPT || RESOLVED_PATHS.llrScript;
+const LLR_HOME = process.env.LLR_HOME || RESOLVED_PATHS.llrHome;
 
 function formatDuration(sec) {
     const total = Math.max(0, Math.round(sec));

@@ -2,1509 +2,300 @@
 
 **NooMesh — Human-readable doctrine. Machine-executable contracts. One session across every Mac and agent.**
 
-> 人读其理，机执其法；一个会话，统御多机 Agent 共享每一次实战积累。
+Most coding-agent "memory" features are invisible, single-vendor prose scratchpads: you cannot see when a memory fired, you cannot share it across VS Code Copilot, Codex, and terminal agents, and you have no protection when source code changes turn yesterday's note into today's hallucination.
 
-A local-first experience engine and cross-agent command mesh that turns what
-you have already debugged and verified into dual-layer doctrine: crystal-clear
-human titles on top, symbol-anchored contracts and zero-model procedures underneath.
+**NooMesh** is a local-first, zero-dependency experience engine and cross-agent command mesh. Every piece of engineering wisdom lives as a **single canonical record with two synchronized faces**:
+- **For Humans**: crisp `<Phenomenon / Scenario>: <Root Cause & Actionable Conclusion>` titles, a native macOS **Liquid Glass Menu Bar HUD**, live source-integrity lights, and a **Token Savings Gas Gauge** proving exact ROI.
+- **For Machines**: symbol-anchored `When / Rule / Trap / Verification` guardrails, epistemic salience gating (`L0 → L1 → L2 → L3`), and deterministic **zero-model `P/R/Q` contracts** (`Preconditions → Steps → Postconditions`) shared across every local agent and re-attested safely across every Mac.
 
-## What this repository does
+---
 
-**NooMesh gives your coding agents (VS Code Copilot, Codex, CLI, and beyond) a
-shared, visible, private experience layer across your machines.** It is a
-headless service with a native macOS Liquid Glass HUD and Teams mobile session
-relay—not another standalone chat silo.
+## Current Capabilities
 
-An approved task verification can become durable local knowledge. A complete
-solution memo records the problem, prerequisites, fixed steps, success checks,
-evidence, and limits. A later session can find that experience, check whether it
-still applies, and reuse the verified path rather than ask a model to invent it
-again.
+- **Dual-Layer Experience Doctrine (`Memo`, `Claim`, `Solution`)**
+  - **Closed-Loop Rule & Trap Memos (`llr.memo.v1`)**: Capture architectural boundaries and debugging pitfalls as `When + Rule + Trap + Verification`, anchored to repo-relative file `SHA-256` digests and symbol invariants (`class`, `fun`, `object`, etc.).
+  - **Evidence-Backed Claims**: Publish observations only when registered local predicates (`json_equals`, unique UI node selectors) pass against immutable, content-addressed evidence blobs.
+  - **Zero-Model `P/R/Q` Solution Contracts (`llr.solution.v1`)**: Compile repeatable read-only checks and pre-authorized validator workflows into typed-enum parameterized procedures that execute locally with `model_calls = 0`.
+  - **Enforced Human-Readable Title Standard**: Every doctrine and session title follows `<Phenomenon / Scenario>: <Root Cause or Core Rule>`—rejecting bare URLs and raw predicate dumps at publication time.
+- **4-Layer Progressive Memory & Salience Gating (`L0 → L1 → L2 → L3`)**
+  - **Compact `L0` Session Index (`<= 1024 B`)**: `sessionStart` injects only workspace counts, sharded theme pointers, explicit preferences, and up to two top title pointers—automatically silenced on unrelated prompts inside monorepo parent roots.
+  - **Epistemic `L2` Ranking**: Ranks candidates by verification strength (`verified solution > active claim/memo > SOFT_DRIFT > BLOCKED warning > unverified legacy > candidate`) within strict UTF-8 byte budgets (`6 KB` default, `12 KB` max).
+  - **Lexical Salience Gate (`relevance_score`)**: Blocks single-stopword and generic-filler false positives (`no`, `PR`, `debug`, `fix`, `UI`) so unrelated rules never pollute context or inflate hit metrics.
+  - **Noise Stop-Bleeding (`tool_traces`)**: Isolates routine `postToolUse` receipts in a lightweight trace table instead of polluting candidate memory, with `llr prune-noise --approve --vacuum` for instant storage compaction.
+- **Resilient Symbol Anchors & Multi-Mac Re-Attestation**
+  - Separates repo-relative source paths and declared symbols from machine-local checkout paths.
+  - Unrelated edits to an anchored file degrade gracefully to **`SOFT_DRIFT`** (reusable with notice) as long as declared symbols still exist, while missing files or deleted symbols fail closed as **`BLOCKED`**.
+- **Deterministic Offline Consolidation (`llr dream-pass` & Idle Auto-Dream)**
+  - Audits symbol-anchor drift, repairs sharded `L1` theme links with optimistic CAS and bloat warnings, and surfaces sanitized `fail -> pass` debugging turnarounds—running with zero LLM calls via CLI, MCP (`local_learning_dream`), or automatically before the Host's 10-minute idle shutdown (`--auto-dream-source`).
+- **Native macOS Liquid Glass Menu Bar HUD (`llr menubar-*`)**
+  - Standalone zero-Dock-icon AppKit + SwiftUI floating glass panel (`NSGlassEffectView` on macOS 26+ with `NSVisualEffectView` fallback, crowned by a custom **Iron-Halo & Astral Star-Cog** template emblem).
+  - Displays stable, anti-jitter **Active Session Tasks** (auto-extracting clean titles from Copilot/Codex metadata and compacting PR/Bug/IcM URLs), exact local doctrine invoked per session, chronological learning/hit feeds, **click-to-inspect full doctrine detail** with one-click Markdown copy and *Open in VS Code* source links, plus one-click offline HTML portal export and `dream-pass` triggers.
+  - Queries SQLite read-only and checks `host-owner.lock` via non-blocking `flock` so UI refreshes never wake a sleeping Host or reset its idle timer.
+- **Token Savings Gas Gauge & Per-Item Ledger**
+  - Tracks acquisition token cost (automatically captured from incremental non-cached Copilot turn telemetry, or computed conservatively from bounded source anchors and evidence blobs) against injected payload overhead.
+  - Renders a 240° radial **Gas Gauge** (cumulative net saved tokens, 24h delta, acquisition investment, ROI multiple, and next milestone target), deduplicates shared source anchors within the same retrieval batch, and shows a 4-cell Token Ledger on every doctrine item.
+- **Single-Session Command & Mobile Relay (`Teams Workflows` + Multi-Mac)**
+  - **Presence-Aware Continuation (`--away-only`)**: Queries macOS `IOConsoleUsers` screen-lock state and `HIDIdleTime` so local turns stay silent while you are actively typing at your Mac, and seamlessly switch to Microsoft Teams Adaptive Cards (`PostCardAndWaitForResponse` with Entra ID `az` Bearer auth) when your screen locks or goes idle.
+  - **Mid-Turn Mobile Decisions**: Send radio-button + free-text Adaptive Cards mid-turn from VS Code (`ask_teams_choice`) or any MCP client (`local_learning_ask_choice`) and resume execution immediately upon mobile reply.
+  - **Proactive Chat Router & Multi-Mac Isolation (`llr inbox-*`)**: Type plain messages directly into your private Teams `Workflows` chat (`@MachineName`, `#sessionPrefix`, `/sessions`, `/new`) to steer matching idle sessions or spawn bounded sessions across multiple Macs sharing one Teams account.
+- **Zero-Dependency, Private-by-Default Core & Bounded Missions**
+  - Pure Python 3.9+ standard library (`dependencies = []`), `0700` private state home (`~/.local-learning-runtime`), deterministic HMAC secret/PII redaction, and approval-gated active-learning missions with hard-capped model budget reservations.
 
-| Capability | What you get |
-|---|---|
-| **Shared memory across sessions** | CLI, MCP and supported client hooks connect to one on-demand local Host and private data store. |
-| **Automatic capture of verified work** | Preauthorized validators save scoped observations and evidence as part of execution, without an extra "save this" prompt. Ordinary tool output is isolated in lightweight `tool_traces` rather than polluting candidate memory. |
-| **Reusable solution memos** | Versioned prerequisites (P), bounded procedures (R), and outcome assertions (Q), with explicit parameter and branch coverage. |
-| **Closed-loop Rule & Trap Memos** | Source-verified engineering rules and pitfall warnings (`When` + `Rule` + `Trap` + `Verification` with resilient symbol anchors), without fake runtime artifact hashes. |
-| **Progressive recall & compact session index** | Inject a `<= 1024` byte `llr.session_index.v1` L0 header at `sessionStart` (gated against unrelated prompts in monorepo alias roots), rank L2 by epistemic tier (`solution > claim/memo > SOFT_DRIFT > BLOCKED > legacy > candidate`), and expand details on demand. |
-| **Deterministic offline `dream-pass`** | Re-anchor drifted source/symbol rules without model calls, audit sharded L1 themes for dangling links and bloat, and surface sanitized `fail -> pass` debugging turnarounds. |
-| **Local-first execution** | Matching verified contracts execute deterministically. Supported readonly pre-model hooks can return a local result without another model inference. |
-| **Bounded learning missions** | Explicitly approve source-inspection and revalidation queues with checkpoints, deadlines, permissions and budgets. Model work requires a separately verified cost gateway. |
-| **Private, inspectable knowledge** | Generate readable local HTML and matching JSON, inspect provenance, detect conflicts and drift, and delete workspace knowledge. |
-| **Preferences without hidden permission grants** | Keep confirmed preferences and unconfirmed habit hypotheses separate from verified facts and action authorization. |
-| **Freshness and observed use** | Enforce evidence-age and dynamic-condition policies, count retrieval separately from verified execution, and explain maintenance priorities without launching experiments. |
+---
 
-## How it works
+## One-Click Agent Install Prompt
+
+Copy the prompt below and paste it directly into **VS Code Copilot Chat**, **Codex**, or **Claude Code** on any Mac (or Linux workstation) to install NooMesh, wire your local client hooks and MCP server, and launch the menu bar HUD automatically:
 
 ```text
-New task
-  -> Identify the workspace and retrieve relevant local experience
-  -> Check prerequisites, verified scope and permissions
-       -> Known and applicable: execute the fixed path and verify the result
-       -> Missing or unknown: report the gap for authorized investigation
-  -> Persist evidence and appropriately scoped knowledge
-  -> Make it available to the next session
+Install and configure NooMesh (https://github.com/yuzhongqi/NooMesh.git) on this machine for my current workspace by executing these exact steps:
+
+1. Clone https://github.com/yuzhongqi/NooMesh.git into "$HOME/Developer/NooMesh" (or run `git -C "$HOME/Developer/NooMesh" pull --ff-only` if it already exists).
+2. Create an isolated Python 3.9+ virtual environment at "$HOME/.local/share/noomesh/venv", upgrade `pip setuptools wheel`, and install "$HOME/Developer/NooMesh" (`pip install .`).
+3. Detect my current repository root (`git rev-parse --show-toplevel`, or current working directory if not in Git), infer a clean `<project>/<platform>` workspace ID (`platform` in `android`, `ios`, or `generic`), and ask me only if the platform is genuinely ambiguous.
+4. Register this workspace and install the local adapters using `$HOME/.local/share/noomesh/venv/bin/llr`:
+   - If `~/.copilot` exists (or VS Code Copilot is used), run:
+     `$HOME/.local/share/noomesh/venv/bin/llr setup "<workspace_id>" --root "<repo_root>" --platform "<platform>" --client copilot --approve`
+   - If `~/.codex` exists, also run `--client codex --approve` (and `--client codex-hooks --approve` if `~/.codex/hooks.json` has no conflicting custom hooks).
+5. Enable offline idle auto-consolidation on the workspace:
+   `$HOME/.local/share/noomesh/venv/bin/python -c "from pathlib import Path; from local_learning_runtime.core import Store; from local_learning_runtime.learning import authorize; s = Store(Path.home()/'.local-learning-runtime'); authorize(s, ['<workspace_id>'], True, auto_dream_source=True); s.close()"`
+6. If running on macOS (`uname -s == Darwin`) with Xcode / CommandLineTools Swift (`xcrun swiftc`), build and launch the native Liquid Glass Menu Bar HUD with login auto-start:
+   `$HOME/.local/share/noomesh/venv/bin/llr menubar-start --install-login-agent --approve`
+7. Run `$HOME/.local/share/noomesh/venv/bin/llr host-status` and `$HOME/.local/share/noomesh/venv/bin/llr doctor`, report the workspace ID, state home, MCP config path, and menu bar PID, and remind me to reload my IDE window once so the newly registered `local_learning` MCP server and lifecycle hooks take effect.
 ```
 
-For example, after a file-identity check has been turned into a verified
-contract, a new session can repeat that check locally. If the source changes,
-the old contract is blocked. A successful check does not become a claim that
-the whole project works or that every future version is compatible.
+### Manual CLI Quickstart
 
-## Important boundaries
-
-- **Local storage is not automatically local inference.** If a client injects
-  retrieved text into a cloud model, that selected text is sent to its provider.
-- **MCP access is not automatic invocation.** Hooks must be installed, supported
-  and trusted; actual client handoffs are diagnosed separately.
-- **Verified observations are not automatically verified solutions.** Complete
-  workflows, parameter combinations and branch paths need their own checks.
-- **No unlimited background learning.** Missions require explicit approval;
-  existing paused learning is not resumed by installation.
-- **Current shared Host support is macOS/Linux.** A Windows transport is not
-  implemented. Arbitrary natural-language requests are not treated as exact
-  executable contracts.
-- **The repository ships software, not your memories.** Real project knowledge,
-  logs, screenshots, account data and generated pages stay outside Git.
-
-## Start here
-
-- [Freshness, usage and maintenance](#freshness-usage-and-maintenance)
-
-- [Install on another Mac](#另一台-mac-安装教程)
-- [Architecture and delivered capabilities](#v04-目标与交付边界)
-- [Complete solution memos](#完整解决-memo)
-- [Layered shared memory](#分层共享记忆)
-- [Bounded learning missions](#主动学习任务)
-
-**Runtime compatibility:** the package remains `local-learning-runtime`,
-the CLI remains `llr`, and private data remains in `~/.local-learning-runtime`.
-The repository rename does not require moving existing checkouts or memories.
-
-## Freshness, usage and maintenance
-
-Verified knowledge is conditional and time-bounded, not permanent truth.
-Default **maximum evidence ages** are 30 days for source-only solutions,
-7 days for runtime observations/solutions, and 1 day for explicitly classified
-remote-service knowledge. Review thresholds are 15 days, 3 days and 12 hours,
-respectively. These are conservative scheduling defaults, not proof that a
-service remains stable until its deadline. Existing source/condition/dependency
-checks still apply, and actual current conditions must be attested.
-These defaults also apply to existing knowledge on its next read/execution.
-They do not rewrite historical evidence or start a revalidation job automatically.
-
-The runtime distinguishes **retrieved**, **expanded**, **selected**,
-**executed**, **verified_success**, **failure**, and **rejected**:
-
-- Retrieval/injection is not proof of model understanding, adoption or success.
-- Selection records a deterministic route decision, not inferred user intent.
-- Only a real passing registered execution renews its verification time.
-  Reading old evidence, replaying an invocation, importing a note, or
-  republishing unchanged data does not renew it.
-- Events are idempotent per version, session, observed operation and parameter
-  case. A success for one case cannot renew another case or an older version.
-- Missing/future verification dates, expired evidence, newer failures and
-  missing current dynamic conditions block direct reuse or require input.
-  Approved revalidation is explicit, never automatically triggered by a read.
-- Bounded successful-reuse counts only break equal-relevance retrieval ties.
-  Popularity never overrides applicability, changes truth, or expands scope.
-- Long inactivity produces an archive suggestion, not deletion or refutation.
-
-Override an individual claim/solution policy using a private JSON file:
-
-```json
-{
-  "knowledge_type": "remote",
-  "max_age_seconds": 86400,
-  "review_after_seconds": 43200,
-  "archive_after_seconds": 7776000,
-  "required_dynamic": ["remote_config_revision"]
-}
-```
-
-Required dynamic names must already be bound in that knowledge's condition
-contract. The program refuses to invent a new applicable scope through a policy
-change. Add/revalidate the actual condition contract first if it is missing.
-
-```sh
-llr memory-policy /private/policy.json --workspace sample/android \
-  --kind solution --id solution-id --approve
-llr memory-health --workspace sample/android --kind solution --id solution-id
-llr maintenance --workspace sample/android
-```
-
-`memory-health` reports the current version's evidence date, revalidation
-deadline, observed counts, execution success rate and explanatory reasons.
-Use `--case-key` (the canonical parameter SHA-256) for a solution's exact case.
-Overview dates conservatively cover the oldest case; per-case checks determine
-execution eligibility. Historical records are preserved when evidence expires.
-
-`maintenance` generates a deterministic **recommendation queue**: condition/
-evidence drift, failures, expiry, frequently selected/executed but aging memos,
-then lower-priority review/archive suggestions. It never starts App operations,
-model requests, automatic deletion or a paused learning mission. The read-only
-MCP equivalent is `local_learning_maintenance`.
-Queue results are paged (default 50, maximum 200); use `--limit` and `--cursor`
-with the returned `next_cursor`. Omission counts never mean all knowledge was reviewed.
-
-The local HTML/JSON portal shows evidence dates, next review, actual outcomes,
-and maintenance reasons from the same data. Export a new snapshot to see changes:
-
-```sh
-llr export-portal --workspace sample/android --output /private/knowledge-view/new-snapshot
-```
-
-### Noise isolation, session index and storage hygiene
-
-- **Ordinary `postToolUse` separation:** Hook events without debugger variable
-  assignments are recorded in `tool_traces` (without raw tool output) instead of
-  `milestones`. They never create unverified candidate cards, advance
-  `knowledge_revision`, or trigger derived view rebuilds.
-- **Bounded `context_views` cache:** Derived view snapshots keep only pinned
-  active-session revisions and at most 8 recent unreferenced revisions. To
-  migrate legacy empty tool-transport milestones and compact an existing SQLite
-  store after stopping idle work:
-  ```sh
-  llr prune-noise --approve --vacuum
-  ```
-- **Compact `sessionStart` L0 header & monorepo alias gating:** `sessionStart`
-  emits `llr.session_index.v1` (`layer: 0`, strictly `<= 1024` UTF-8 bytes:
-  counts, custom themes, explicit preferences, and up to 2 single-line top-hit
-  pointers). When `cwd` matches only via a parent `workspace_alias` (such as a
-  monorepo root) and the prompt has no target platform, workspace slug, `.kt`/`.swift`
-  file cue, or workspace technical identifier match, the hook returns `{}` (zero
-  bytes injected, recorded in `llr doctor` as `context_injected: false`,
-  `gated: "alias_irrelevant"`).
-- **Epistemic L2 tiering & conversational stopword filtering:** `context --level 2`
-  orders matches by `usable solution > usable claim/memo > SOFT_DRIFT > BLOCKED
-  safety warning > legacy > candidate` before lexical score and bounded reuse
-  count, and strips high-frequency English/Chinese conversational filler before
-  bigram matching.
-
-### Resilient symbol anchors, closed-loop Rule/Trap Memos and offline `dream-pass`
-
-- **Symbol-backed source anchors (`SOFT_DRIFT` vs `BLOCKED`):** Source anchors on
-  both `claims` and `memos` may declare `symbols` (`1..16` exact class/function
-  signatures verified in the workspace file on publication):
-  ```sh
-  llr anchor sample/android src/HostConfigProvider.kt \
-    --symbol "class HostConfigProvider" \
-    --symbol "fun observeInvalidation"
-  ```
-  If an unrelated edit changes the file's full-file SHA-256 while all declared
-  symbols remain intact, retrieval marks `reuse: "SOFT_DRIFT"` (usable with an
-  anchor-drift notice) instead of falsely blocking the rule. Deleting or renaming
-  any declared symbol immediately flips `reuse` to `"BLOCKED"`. Anchors without
-  `symbols` keep strict full-file SHA-256 blocking.
-- **Closed-loop `Rule / Trap Memos` ([memo.v1.schema.json](schemas/memo.v1.schema.json)):**
-  Engineering boundaries and debugging pitfalls that have no single APK
-  `artifact_sha256` use `llr.memo.v1` (`when`, `rule`, `trap`, and live
-  source/symbol `verification`):
-  ```sh
-  llr memo-propose /private/memo.json --expected-version 0 --approve
-  llr memo-invalidate memo-id --workspace sample/android --version 1 \
-    --state stale --reason "Superseded by new module boundary" --approve
-  ```
-  Memos use the 30-day `source` freshness policy, appear across `search`,
-  `context` (`L0`–`L3`), `catalog`, and `export-portal`, and are removed cleanly
-  by `forget-workspace`.
-- **Sharded L1 Theme concurrency & anti-bloat checks:** `define-theme` supports
-  optimistic `--expected-version` (preventing concurrent shard overwrites) and
-  `--strict-links` (rejecting dangling member IDs), and flags `bloat_warning`
-  when a theme shard grows larger than its members' anchored source files.
-- **Deterministic offline consolidation (`llr dream-pass` & MCP `local_learning_dream`):**
-  ```sh
-  llr dream-pass --workspace sample/android
-  llr dream-pass --workspace sample/android --apply --approve
-  llr authorize-local --workspace sample/android --auto-dream-source --dream-interval 43200 --approve
-  ```
-  Dry-run (`model_calls: 0`, also exposed read-only via MCP `local_learning_dream`)
-  reports symbol-valid `reanchorable` items, `broken_anchors`, L1 `theme_repairs`
-  (removing dead links or remapping `claim:<id>` to `memo:<ws>:<id>`),
-  `bloat_warnings`, unmapped verified nodes, and sanitized `fail -> pass`
-  `turnaround_episodes` captured in `tool_traces`. With `--apply --approve`, it
-  transactionally refreshes verified file SHA-256s, renews source verification
-  timestamps, and repairs theme shards—while keeping strict runtime claims gated
-  on real App revalidation. When `--auto-dream-source` is enabled, the shared
-  Host automatically runs one throttled `dream-pass` (default once per 12 hours,
-  recorded in `llr doctor` as `host-idle / autoDreamPass`) right before its
-  idle shutdown when no client requests or missions are active.
-
-### Teams Workflows completion notifications (VS Code, Codex & Missions)
-
-Because VS Code Copilot (`agentStop`), Codex (`Stop` / `notify`), and background
-learning missions all converge on the shared local Host, configuring one private
-Microsoft Teams **Workflows** webhook notifies your personal chat (for example
-`Chat with Workflows` or your self-chat `(You)`) across every client:
-
-1. In Microsoft Teams, open **Workflows** (or `...` → **Workflows** inside your
-   self-chat) and pick **"Post to a chat when a webhook request is received"**
-   (or build a 2-step flow: `When a Teams webhook request is received` →
-   `Post message in a chat or channel`), then copy the HTTPS webhook URL.
-2. Save the URL privately via stdin (`0600` `~/.local-learning-runtime/notifier.json`,
-   kept out of shell history and Git) and verify delivery:
-   ```sh
-   pbpaste | llr notify-config --webhook-stdin --min-duration 30 --approve
-   llr notify-test --approve
-   llr notify-status
-   ```
-- **Security & anti-spam guards:** Remote URLs must use `https://` on official
-  Microsoft Workflows / Power Platform / Office domains (`*.logic.azure.com`,
-  `*.api.powerplatform.com`, `*.powerautomate.com`, `*.webhook.office.com`) with
-  redirects refused; when corporate DLP disables anonymous `?sig=` triggers
-  (`Any user in my tenant` / `Specific users in my tenant`), the notifier
-  automatically acquires a fresh Entra ID Bearer token for
-  `https://service.flow.microsoft.com/` via local Azure CLI (`az`) without
-  persisting tokens. SAS query signatures and tokens are redacted from `notify-status`,
-  `doctor`, and receipts. Turns shorter than `--min-duration` (default `30s`) are
-  skipped, Codex `Stop` + `notify` events are deduplicated per turn, dispatch runs
-  asynchronously in a detached background process so IDE hooks never block, and
-  cards carry only sanitized metadata (client, workspace, duration, state, and a
-  redacted 90-char summary—never source code or raw transcripts). To pause or
-  re-enable: `llr notify-config --disable --approve` / `--enable --approve`.
-- **Bidirectional mobile session relay across multiple Macs, VS Code & Codex:**
-  Pair one Power Automate `PostCardAndWaitForResponse` (`Post adaptive card and wait
-  for a response` → `Compose`) workflow on your Microsoft account with both VS Code
-  Copilot (`setup ... --client copilot` automatically installs
-  [teams-remote-extension.mjs](adapters/teams-remote-extension.mjs) into
-  `~/.copilot/extensions/teams-remote/extension.mjs`) and Codex (`Stop` hook
-  `decision: "block"` continuation + shared `local_learning_ask_choice` MCP tool):
-  ```sh
-  pbpaste | llr relay-config --webhook-stdin --env-id "<ENV_ID>" --flow-id "<FLOW_ID>" \
-    --machine-name "MacStudio" --min-duration 15 --away-only --away-idle 60 \
-    --auto-on-stop --approve
-  llr relay-status
-  ```
-  - **Multi-Mac isolation:** Multiple Macs can share the exact same Teams workflow
-    without interference—each card creates its own Power Automate `run_id` polled
-    only by the originating Mac and session, while `--machine-name` (defaulting to
-    `hostname`) stamps `[Machine · VS Code / Codex]` on both the card header and
-    submit button (`🚀 发回 MacStudio 当前 Session`).
-  - **Presence-aware silencing:** With `--away-only`, local turns stay silent on
-    Teams while you are at that Mac (`IOConsoleUsers` unlocked and
-    `HIDIdleTime < --away-idle`, default `60s`), switch to Teams on screen lock or
-    idle, and keep replying to Teams once a turn originates from Teams until you
-    type at that Mac again. Mid-turn mobile decisions are available in VS Code via
-    `ask_teams_choice` and in both Codex and VS Code via MCP `local_learning_ask_choice`.
-  - **Proactive plain-text Workflows chat routing (`llr inbox-*`):** Even when no
-    session has sent a card first, pairing a `GetMessagesFromChat` reader workflow
-    lets you type plain messages directly in the Teams `Workflows` chat bottom box:
-    ```sh
-    pbpaste | llr inbox-config --reader-stdin --poll-seconds 6 \
-      --default-cwd "/path/to/repo" --allow-new-sessions --approve
-    llr inbox-status
-    ```
-    The Host polls only that private `Workflows` conversation, ignores bot messages,
-    and routes your text to the best-matching open session (by `#<sessionPrefix>`,
-    workspace/title relevance, or `@<MachineName>` across multiple Macs) via
-    `teams-remote` heartbeat pickup—or spawns a fresh bounded read-only CLI session
-    when you prefix `/new [@workspace] <prompt>` or when no live session is open,
-    and replies with `/sessions` when asked to list open sessions.
-  - **Native macOS Menu Bar live dashboard (`llr menubar-*`):** Compile and launch a
-    zero-Dock-icon Liquid Glass status bar utility (custom Iron-Halo & astral
-    star-cog template glyph + live 24h knowledge-hit counter) featuring a **Token Savings Gas Gauge**
-    (cumulative net saved tokens, 24h delta, acquisition-cost ROI multiple, and
-    shared-anchor deduplication), active IDE tasks with per-session & per-item saved
-    token badges, clickable `24h 命中` analytics, click-to-inspect full knowledge
-    content (`When` / `Rule` / `Trap` / `Verification`, 4-cell Token Ledger, evidence
-    excerpts, and anchored source files), and one-click HTML portal / offline
-    `dream-pass` actions without resetting the Host idle timer:
-    ```sh
-    llr menubar-start --install-login-agent --approve
-    llr menubar-status
-    llr menubar-stop
-    ```
-
-These checks are wired into claim recall/search, progressive context,
-solution route/execute, dependency checks and context refresh. A pinned old view
-remains inspectable but cannot pretend to be the currently applicable version.
-This is not a background watcher of every external dependency: unregistered
-conditions and remote changes still require explicit collectors and verification.
-
-## 另一台 Mac 安装教程
-
-**安装代码能力，不会带入原机器的私人知识。** 仓库是 public，克隆无需 GitHub
-账号授权；提交改动仍需要仓库权限或通过 fork/PR。本教程适用于 macOS、Python 3.9+
-及支持对应接口的客户端。核心服务不要求 Android SDK；实际 App 验证才需要相应工具。
-
-### 1. 获取仓库
-
-先准备 Git、Python 3.9+。公开仓库可以直接克隆，不需要 GitHub CLI 或模型账号：
+If you prefer running the setup directly in your terminal:
 
 ```sh
 mkdir -p "$HOME/Developer"
 git clone https://github.com/yuzhongqi/NooMesh.git "$HOME/Developer/NooMesh"
 cd "$HOME/Developer/NooMesh"
+
+python3 -m venv "$HOME/.local/share/noomesh/venv"
+"$HOME/.local/share/noomesh/venv/bin/python" -m pip install --upgrade pip setuptools wheel
+"$HOME/.local/share/noomesh/venv/bin/python" -m pip install .
+
+# Register your project and wire VS Code Copilot (or --client codex / codex-hooks)
+"$HOME/.local/share/noomesh/venv/bin/llr" setup my-app/generic \
+  --root /absolute/path/to/your/repo \
+  --platform generic \
+  --client copilot \
+  --approve
+
+# On macOS: compile & launch the top-right Liquid Glass Menu Bar HUD + login LaunchAgent
+"$HOME/.local/share/noomesh/venv/bin/llr" menubar-start --install-login-agent --approve
+
+# Verify daemon health and adapter handoffs
+"$HOME/.local/share/noomesh/venv/bin/llr" host-status
+"$HOME/.local/share/noomesh/venv/bin/llr" doctor
 ```
 
-不要把 GitHub 密码、认证器验证码或 token 写入命令、仓库和知识文件。
+---
 
-### 2. 在私人虚拟环境安装
+## Implementation Principles & Architecture
 
-不要直接修改 macOS 的共享系统 Python。旧 pip/setuptools 可能生成空的
-`UNKNOWN-0.0.0` 包；使用独立环境并更新构建工具：
+### 1. System Topology: Shared Local Host & Multi-Agent / Multi-Mac Mesh
 
-```sh
-python3 -m venv "$HOME/.local/share/llr/venv"
-source "$HOME/.local/share/llr/venv/bin/activate"
-
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install .
-python -m pip show local-learning-runtime
-
-llr host-status
-```
-
-当前版本应显示 `local-learning-runtime`、版本 `0.4.1`；`host-status` 返回
-`READY`、PID、`state_home`。不要把 `UNKNOWN-0.0.0` 当作安装成功。
-
-**保留该虚拟环境**：安装器生成的客户端配置会引用其中的 Python。新终端执行
-`llr` 前重新 activate，或直接使用：
-
-```sh
-"$HOME/.local/share/llr/venv/bin/llr" doctor
-```
-
-客户端通过绝对路径启动桥接器，不要求你为每次聊天手动 activate。
-
-### 3. 登记该机器的项目
-
-下面的 OfficeMobile 仅是接入示例，不是引擎内置业务。必须把示例路径替换成新 Mac
-上的真实 checkout；workspace ID 是稳定业务标识，目录是本机位置。
-
-```sh
-PROJECT_ROOT="/替换为实际路径/officemobile/android/JavaKotlin"
-```
-
-同一 workspace 的重复 setup 必须使用相同根目录，不会静默重绑定。
-iOS 使用另一个 ID（例如 `officemobile/ios`）及 `--platform ios`；
-普通项目可使用 `--platform generic`。Android 经验不会自动授予 iOS 验证。
-
-### 4. 接入 VS Code Copilot
-
-```sh
-llr setup officemobile/android \
-  --root "$PROJECT_ROOT" --platform android \
-  --client copilot --approve
-```
-
-安装器写入用户级 hooks 和 MCP，不修改 Office 源码，保持已有模型配置。
-当前路径针对 Copilot Agent Host／Copilot CLI hook schema。其他 VS Code provider
-或旧版本必须单独检查兼容性，不能因同属 VS Code 就认为自动接通。
-
-重新加载 VS Code，检查目标 harness 的 Hooks／MCP 来源，再创建新 chat。
-配置存在只表示安装完成；实际触发还需要第 7 步验证。
-
-### 5. 接入 Codex
-
-先安装 MCP 和完成通知（保留已有通知链）：
-
-```sh
-llr setup officemobile/android \
-  --root "$PROJECT_ROOT" --platform android \
-  --client codex --approve
-```
-
-支持生命周期 hooks 的 Codex 桌面版本，再安装：
-
-```sh
-llr setup officemobile/android \
-  --root "$PROJECT_ROOT" --platform android \
-  --client codex-hooks --approve
-```
-
-在实际 Codex 桌面 App 的 **Settings → Hooks** 中 review/trust 新 hooks，
-重新启动客户端并创建新聊天。旧 Codex CLI 没有相同 hook 能力时只能使用 MCP／notify
-替代路径；不能把 CLI 测试当成桌面 App 的验收。
-
-可选的本地零推理请求门禁：
-
-```sh
-llr setup officemobile/android \
-  --root "$PROJECT_ROOT" --platform android \
-  --client codex-hooks --local-first-readonly --approve
-```
-
-这只会对精确匹配、P/R/Q 已验证的纯文件只读流程返回本地结果并阻止后续模型请求。
-新机器记忆库为空时没有可复用流程；不要期望安装本身就能解决所有问题。
-不支持该 hook 的客户端仍按其能力等级工作。
-
-默认客户端目录是 `~/.copilot` 或 `~/.codex`。如果实际客户端使用自定义目录，
-setup 可加 `--profile "/实际客户端配置目录"`；它不是 agent 的私人数据目录。
-多个客户端必须指向同一个 agent `--home`，才能共享同一份记忆。
-`--home` 是全局参数，放在子命令前（例如 `llr --home "/私人状态目录" host-status`）。
-
-### 6. 打开父目录时登记发现别名
-
-如果 App 打开 `officemobile` 父目录，而登记的是 `android/JavaKotlin`：
-
-```sh
-llr register-alias --workspace officemobile/android \
-  --root "/替换为实际路径/officemobile" --require-platform --approve
-```
-
-别名只用于发现，不改变源码锚点根目录。多平台父目录需要任务明确平台，否则返回
-`AMBIGUOUS`；未登记目录返回 `UNKNOWN_WORKSPACE`。在父级别名目录（`via_alias: true`，
-例如大型 Monorepo 根目录）中，被动生命周期 hook 会执行**相关性门控**：当输入既未指明目标平台／
-项目标识，也未命中已登记主题或正式知识中的领域技术标识符时，自动静默跳过注入（返回 `{}`，
-不创建无关 `task_run`）。初次验收建议直接打开登记的根目录，或在提问中带明确业务标识。
-
-### 7. 验证真实接入
-
-```sh
-llr doctor
-llr context --cwd "$PROJECT_ROOT" --query "Android" --session install-check --level 0
-```
-
-然后在 VS Code／Codex 中创建全新 chat，提出普通项目问题，再运行 `llr doctor`
-检查 `recent_handoffs`：
-
-- 实际 session 是否留下交接记录（包含 `context_injected` 与门控原因 `gated`）；
-- workspace、客户端和时间是否正确；
-- hook 是否被信任并触发；
-- 有知识时是否引用正确 revision、条件和证据。
-
-> **VS Code 指令缓存提示**：修改或移除 `~/.copilot/instructions/*.instructions.md` 后，
-> `Developer: Reload Window` 仅刷新前端窗口而不重启后台常驻的 `copilot-runtime` 进程；
-> 完全退出并重开一次 VS Code（`Cmd + Q`）才会刷新内存中的全局指令缓存。
-> 更新本地 runtime 代码后，执行 `llr host-stop` 让守护进程按需加载新代码。
-
-**空库不是失败**；没有实际交接凭据则不能声称客户端自动接通。真正的运行验证还需要
-登记对应预授权 validator；setup 不授权登录、消息发送、购买、隐私设置变更或任意命令。
-
-### 8. 私人数据、更新与迁移
-
-默认私人状态目录：`~/.local-learning-runtime`。不在 Git checkout 内。
-代码、虚拟环境和知识数据是三个不同位置；不要把数据库、HTML、日志或截图推送仓库。
-安装不会启动夜间模型学习，也不会迁移旧机器的知识。
-
-更新时先等待活动操作结束，在源码 checkout 拉取最新代码并重新安装：
-
-```sh
-llr host-stop
-cd "$HOME/Developer/NooMesh"
-git pull --ff-only
-python -m pip install --upgrade .
-llr host-status
-```
-
-上述命令需在第 2 步虚拟环境中执行。如果服务已因空闲退出，`host-stop` 可报告未运行；
-不要因此启动或终止其他无关进程。更新后重新启动客户端；hook 定义变化需再次 trust。
-实际安装不修改既有模型账号／提供方配置。
-
-本版没有自动跨 Mac 同步／一键安全迁移。**不要直接复制运行中的 SQLite 数据库**。
-旧知识包含目录、可执行文件授权、证据条件和私人完整性密钥；迁移需要一致备份、
-路径重映射、重新授权及复验。私人 HTML 可作为历史参考，但不能据此把新机器标成已验证。
-新 Mac 可先独立使用和积累；正式迁移应走单独审阅的流程。
-
-## v0.4 目标与交付边界
-
-| 目标 | 本版实现 | 不能混淆的边界 |
-|---|---|---|
-| 跨 session 连续性 | 按需启动的用户级 Unix-socket Host；每个 MCP 进程是薄桥接器 | 当前服务支持 macOS/Linux，Windows named-pipe 适配器尚未交付 |
-| 已验证路径复用 | 完整 Solution Memo：问题、参数、前置条件 P、步骤 R、结果检查 Q、证据 | 相似度不授权执行；候选观察不能直接变成完整解决流程 |
-| 自动沉淀 | 既有里程碑自动发布；声明问题的批准验证器自动编译解决候选 | 编译候选仍需完整 trial；不自动扩大解决范围 |
-| 分层记忆 | L0 项目目录、L1 主题地图、L2 任务包、L3 pinned 展开；显式预算与遗漏数 | 字节预算不等于客户端实际 token/费用预算 |
-| 本地优先 | 确定性问题 pattern＋有限已验证参数组合；纯本地 P/R/Q 执行 | 自由自然语言／模糊任务可检索，但不会被猜测为可执行 |
-| 零模型路径 | CLI／MCP 受控执行；可选 Codex 只读 prompt gate 直接返回本地结果 | 其他客户端仅注入上下文时不计为零模型接入 |
-| 主动学习 | DRAFT→审批→队列、检查点、暂停、恢复、截止与预算；Host 自动推进批准任务 | 默认不允许模型或 App 操作；当前旧学习暂停不会被解除 |
-| 个体经验 | 显式偏好及待确认习惯假设；同库派生图谱和 HTML | 偏好不是权限，推测不是事实 |
+NooMesh runs an **on-demand, user-private Unix-domain socket daemon** (`~/.local-learning-runtime/ipc/agent.sock`, permissions `0700`). Every IDE hook, MCP stdio bridge, CLI call, and Teams relay talks to the same serialized authority—while the macOS Liquid Glass HUD observes SQLite read-only without disturbing the Host's 10-minute idle lifecycle.
 
 ```mermaid
 flowchart TD
-    VS["VS Code sessions"] --> AD["客户端适配器 / MCP 桥"]
-    CX["Codex sessions"] --> AD
-    AD --> HOST["共享本地 Agent Host"]
-    HOST --> SCOPE["用户 / 项目 / 平台识别"]
-    SCOPE --> MEMORY["L0 → L1 → L2 → L3"]
-    MEMORY --> ROUTE{"条件、参数与目标覆盖"}
-    ROUTE -->|满足| EXEC["确定 P/R/Q 流程执行"]
-    ROUTE -->|未知| GAP["明确缺口 / 询问"]
-    GAP -.授权与费用门禁.-> MODEL["模型探索"]
-    EXEC --> LEARN["验证与经验编译"]
-    MODEL --> LEARN
-    LEARN --> DB["私人 SQLite + 证据"]
-    DB --> MEMORY
-    DB --> VIEW["同源图谱 / HTML / JSON"]
-    HOST --> MISSION["批准的有界主动学习任务"]
-    MISSION --> MEMORY
-    MISSION --> LEARN
+    subgraph Clients["Unified Session & Agent Plane"]
+        VSC["VS Code Copilot<br/>Lifecycle Hooks + MCP + SDK Extension"]
+        CDX["Codex Desktop & CLI<br/>UserPromptSubmit / PostToolUse / Stop + MCP"]
+        SHL["Terminal / CI / Custom Agents<br/>llr JSON CLI"]
+        MOB["Mobile Single-Session Control<br/>Microsoft Teams Workflows<br/>(@Machine #session / Adaptive Cards)"]
+    end
+
+    subgraph HostPlane["On-Demand Local Authority (~/.local-learning-runtime)"]
+        SOCK["Unix-Socket AgentServer<br/>(ipc/agent.sock · 0700 · CAS Serialized)"]
+        DISC["Checkout & Alias Discovery<br/>(Repo Boundary + Platform Disambiguation)"]
+        GATE["4-Layer Context & Salience Gate<br/>(L0 <=1KB -> L1 Themes -> L2 Ranked -> L3 Full)"]
+        PRQ["Deterministic P/R/Q Engine<br/>(Zero-Model Preconditions / Steps / Postconditions)"]
+        DRM["Offline Dream-Pass Worker<br/>(Symbol Drift Audit + Theme Repair on Idle)"]
+    end
+
+    subgraph Storage["Private Verifiable Store (Outside Git)"]
+        DB[("runtime.sqlite<br/>memos · claims · solutions · themes<br/>live_sessions · token_baselines · tool_traces")]
+        BLOB[("evidence/<br/>Immutable SHA-256 Content-Addressed Blobs")]
+    end
+
+    subgraph HumanHUD["Human Visibility Plane (Zero Idle Interference)"]
+        MB["macOS Liquid Glass Menu Bar HUD<br/>(Direct Read-Only SQLite + Non-Blocking flock)"]
+        PORTAL["Offline HTML Knowledge Portal<br/>(Pinned Revision Cards + Provenance)"]
+    end
+
+    VSC <-->|stdio MCP / Hooks| SOCK
+    CDX <-->|stdio MCP / Hooks| SOCK
+    SHL <-->|JSON IPC| SOCK
+    MOB <-->|Entra Bearer HTTPS<br/>Presence-Gated Relay & Inbox| SOCK
+
+    SOCK --> DISC --> GATE
+    GATE -->|Exact Verified Contract| PRQ
+    SOCK --> DRM
+    GATE <--> DB
+    PRQ <--> DB
+    DB <--> BLOB
+
+    DB -.->|Read-Only Snapshot & Token Gas Gauge| MB
+    DB -.->|export-portal| PORTAL
 ```
 
-### 安装与载体
+### 2. Dual-Layer Doctrine Lifecycle: From Debugging Turn to Zero-Model Reuse
 
-Python 3.9+，无运行时第三方依赖。完整步骤见上方
-[另一台 Mac 安装教程](#另一台-mac-安装教程)。
-已构建 wheel 不需要重建源码；源码安装需要兼容的构建工具。
-
-也可使用现有 `tools/llr.py`，或发行包自带 `local_learning_runtime/entry.py`。
-不用给新客户端手写仓库脚本路径。安装需要一次授权；Codex hooks 必须在实际客户端
-review/trust，不绕过 trust。模型账号／提供方配置保持不变。
-
-普通 CLI、hooks 与 MCP 请求自动连接同一个用户级 Host。没有批准任务时 Host
-空闲 10 分钟退出；下次按需启动。批准任务在聊天关闭后继续，电脑仍需保持可运行。
-不暴露公网端口；IPC 目录仅当前 OS 用户可访问。
-
-```sh
-llr host-status
-llr doctor
-llr host-stop
-```
-
-`doctor` 展示真正收到的交接凭据；“配置文件存在”不代表客户端已触发。
-旧客户端进程需重新启动以加载新桥接实现。安装包升级后，在没有活动操作时停止旧
-Host，再连接新版本。`host-stop` 拒绝中断正在执行的学习步骤。
-
-### 完整解决 memo
-
-Schema：[solution.v1.schema.json](schemas/solution.v1.schema.json)。
-一份 contract 有问题 pattern、有限 typed 参数、P 条件、R 步骤、Q 断言、结果和边界。
-
-- 条件：实际文件指纹、显式条件相等、版本固定的解决依赖。
-- 步骤：`inspect_file`、已批准的 `run_validator`、结构化 `select`、有界 `branch`。
-- 参数：首版使用明确枚举，每个组合都有自己的验证 case；一次成功不验证整个范围。
-- 流程：无任意 shell、无动态 eval、无模型临时生成步骤。
-- 分支：最多一层、每侧最多 8 步、整体最多 32 步；未实测的分支在执行其动作前拒绝复用。
-- 解决依赖及验证器授权变化会阻止旧流程继续使用。
-
-```sh
-llr solution-propose /private/solution.json --expected-version 0 --approve
-llr solution-verify solution-id --workspace sample/android --session training \
-  --invocation case-1 --parameters /private/inputs.json --conditions /private/conditions.json --approve
-llr route --cwd /absolute/project --query "ordinary approved task" --session new-session
-llr solution-execute solution-id --workspace sample/android --session new-session \
-  --invocation request-1 --parameters /private/inputs.json --conditions /private/conditions.json
-```
-
-`LOCAL_READY` 不等于已解决：实际 Q 通过才返回 `LOCAL_SOLVED`。未知条件返回
-`NEEDS_INPUT`，不适用／失效返回 `BLOCKED`，没有经验返回 `NEEDS_EXPLORATION`。
-完整执行持久保存 proof，并保护重复或中断调用不自动重复副作用。
-
-注册 runner 可额外声明 `problem: {intent, goal, patterns}`。其可信验证结果发布后，
-自动编译 P/R/Q **候选**；它不会因观察 PASS 就被标成 verified solution。
-只读新参数 trial 和新的操作授权也必须区分。
-
-### 分层共享记忆与闭环规则 Memo
-
-```sh
-llr anchor sample/android src/HostConfigProvider.kt --symbol "class HostConfigProvider"
-llr memo-propose /private/memo.json --expected-version 0 --approve
-llr define-theme /private/theme.json --workspace sample/android --expected-version 0 --strict-links --approve
-llr dream-pass --workspace sample/android --apply --approve
-llr context --cwd /absolute/project --query "android" --session S --level 0
-llr context --cwd /absolute/project --query "startup" --session S --level 1
-llr context --cwd /absolute/project --query "actual task" --session S --level 2
-llr context --cwd /absolute/project --query "android" --session S --level 3 \
-  --node RETURNED_NODE --revision RETURNED_REVISION --cursor 0
-llr context-refresh --session S
-```
-
-L0 只给目录（`sessionStart` 自动注入精简版 `llr.session_index.v1`，严格 `<= 1024` UTF-8 bytes），
-L1 给分片主题关键点与有限成员（支持 `--expected-version` 乐观锁、`--strict-links` 死链拦截与膨胀比告警），
-L2 按认知可信度分档（可用 `solution` > 可用 `claim`/`memo` > 符号仍在但文件局部改动的 `SOFT_DRIFT` >
-`BLOCKED` 风险提示 > `legacy` > `candidate`）返回任务候选及完整条件，
-L3 按完整字段展开。`context` 默认 6000 UTF-8 bytes，最大 12000；返回遗漏数和 cursor。
-单个必要字段超过预算时显式 `ITEM_TOO_LARGE`，不截掉条件保留结论。
-本地执行器读取完整 contract，不凭摘要执行。
-
-`llr.memo.v1`（[memo.v1.schema.json](schemas/memo.v1.schema.json)）为架构边界与排障经验提供一等公民的
-**`When + Rule + Trap + Verification（符号锚点）`** 闭环结构；**所有 `Memo`、`Claim`、`Solution` 及会话展示标题
-（可通过 `llr session-title --session <id> --title "<summary>"` 显式标注，或自动从本地会话元数据提取并压缩
-PR/Bug/IcM 链接）均遵循 `<现象或场景>：<明确根因或核心结论>` 的人类可读总结规范**（拒绝裸 URL 或原始断言转储），确保在状态栏
-中一眼即可识别当前任务与复用的具体经验。`llr dream-pass`（及只读 MCP
-`local_learning_dream`）在不调用任何模型的前提下离线复核符号锚点、修补主题断链并汇总 `fail -> pass`
-排障转折线索。
-
-主题别名、成员和一跳关系属于私人项目配置，不把业务关键词写入引擎。
-索引和 summaries 来自一个权威存储（`context_views` 自动限制未引用历史快照数量）；
-snapshot 固定 revision，任务边界 refresh。
-当前使用去除了中英文会话套话与助词伪二元词的本地词法匹配，不声称已提供通用语义理解或大型向量索引。
-
-### 客户端关系与本地优先
-
-既有 MCP 增加：
-`local_experience_context`、`local_experience_route`、`local_experience_execute`、`local_learning_dream`。
-普通 task/验证事件继续使用既有 API，不建立平行知识库。
-
-`sessionStart` hook 仅注入 `<= 1024 UTF-8 bytes` 的 `llr.session_index.v1` L0 极简索引头
-（工作区统计、注册主题、显式偏好与最多 2 条单行标题指针）；在父级别名目录（如 Monorepo 根）
-且首轮输入无目标平台或领域词命中时自动静默跳过注入。无调试器赋值的普通 `postToolUse`
-仅记入轻量 `tool_traces`，不进入 `candidate` 记忆池；历史空壳回执可通过
-`llr prune-noise --approve --vacuum` 清理回收。
-
-Codex 支持的 UserPromptSubmit hook 在相关性门控通过后自动提供有界 L2；可选择在 `setup ... --client
-codex-hooks --local-first-readonly --approve` 后，让**精确匹配、已验证、纯文件只读**
-流程直接完成并 block 后续模型请求，结果通过 hook 消息展示。
-
-不匹配、未知条件、涉及 App 的慢操作不会在 prompt hook 中自动扩大执行范围。
-支持其他流程的 CLI／SDK 调用同样零模型；原生聊天仅注入知识的情况仍属于 C2，
-不计为零模型。适配器被禁用、未信任或失败必须单独诊断。
-
-### 主动学习任务
-
-Schema：[mission.v1.schema.json](schemas/mission.v1.schema.json)。
-问题类型：有界 source inventory、单文件 identity 检查、已验证解决流程复验、
-经授权的单次 model explanation。静态 inventory 不代表架构理解完成。
-
-```sh
-llr mission-create /private/mission.json
-llr mission-control mission-id approve --approve
-llr mission-control mission-id start
-llr mission-status mission-id
-llr mission-control mission-id pause
-llr mission-control mission-id resume --approve
-```
-
-Host 自动推进 RUNNING 任务。范围、文件总量、时间、请求次数和花费分别有预算。
-未批准任务不自动运行。中断／未知 runtime outcome 或已尝试的模型请求不会隐式重放。
-CLI `mission-tick` 主要用于显式诊断与验收，正常后台由 Host 驱动。
-
-模型默认关闭。只有私人 `model-gateway.json` 明确登记批准 endpoint、model、rates、
-workspace、凭据环境变量及经过外部核实的 hard cap 后才可发送。
-发送前预留最坏费用；请求携带 reservation 和 request ID；拒绝重定向；
-账单／usage 不明、超额或 credential 缺失会停止，绝不自动重试收费未知请求。
-保守地保留 reservation，不把估算冒充实际账单。
-现有 Copilot 代理未被该代码自动认定具备费用硬限额，也没有被启动夜间模型循环。
-
-### 个体习惯与知识查看
-
-`preference` 支持明确偏好和 inferred 候选；显式确认与版本检查独立于操作权限。
-现有 `export-portal` 继续从本地库生成人可读 HTML 和 agent JSON，并包含解决
-contract、任务和学习 mission 状态。在 macOS 上还可通过
-`llr menubar-start --install-login-agent --approve` 启动右上角状态栏原生面板
-（[NooMeshMenuBar.swift](adapters/macos_menubar/NooMeshMenuBar.swift)，无 Dock 图标、
-单实例 `flock` 锁、只读直连 SQLite 不重置 Host 10 分钟空闲休眠计时器），实时查看当前活跃任务调用了哪些
-本地 `Memo` / `Claim` / `P/R/Q 契约` 并一键打开 HTML 知识门户或触发离线巡检整理。
-memo、graph、index 不是三份可独立编辑的事实。
-私人数据、export、证据和客户配置都不上传 GitHub。
-
-## 兼容的 v0.2 功能与详细参考
-
-A client-neutral, offline first implementation of evidence-backed app learning.
-It captures observations, checks explicit predicates, publishes reviewed claims,
-and recalls applicable knowledge in later sessions.
-
-**This is a working local core, not a promise that an LLM will understand every
-fact or that a plugin can intercept every VS Code/Codex/OpenClaw operation.**
-No model API, recurring job, private memo import, or account login is started.
-
-## 想了解本地知识：按需生成 HTML
-
-**仓库交付生成能力，不交付私人知识数据。** 当用户说“让我看看本地已经学到了什么”
-或“生成人能读的知识页面”时，使用本仓库的本地生成器，而不是上传数据库，也不是
-让模型凭聊天记忆重新编写结论。
-
-```text
-本机 runtime.sqlite + evidence/
-    → catalog：读取指定 workspace 的本地记录并检查完整性
-    → export-portal：确定性渲染中文知识卡片
-    → 本机 index.html（人阅读）+ catalog.json（agent 读取）
-```
-
-从本仓库目录运行，替换下面的示例路径和 workspace：
-
-```sh
-python3 -m local_learning_runtime \
-  --home /absolute/private/runtime-state \
-  export-portal --workspace sample/android \
-  --output /absolute/private/knowledge-pages/view-001
-```
-
-无需安装额外依赖，不启动模型、网络服务或 app。`--home` 必须放在子命令前；
-也可以用 `LLR_HOME` 指定本地状态目录。默认状态目录为
-`~/.local-learning-runtime`。
-
-命令返回本地 HTML 路径、JSON 路径、知识 revision，以及发布知识和历史记录数量。
-在浏览器打开返回的 `index.html`，即可查看：
-
-- 已发布知识：结论、适用边界、完整性检查结果、相关证据；
-- 历史线索：保留原状态，明确标为尚未重新验证；
-- 待处理项：候选结论和未解决的问题；
-- 证据：可读的断言节点或结果摘要，原始内容按需展开。
-
-页面不是重新“创造”知识。人类视图与 agent JSON 来自同一份本地数据和 revision；
-未知内容不补写，检查失败不包装成成功。当前渲染器不调用 LLM：已有中文记录直接
-展示，受控验收模板用固定中文说明，其他任意语言的结论保留原文，不保证自动翻译。
-
-### Agent 按需展示协议
-
-1. 确认用户要查看的本地状态目录和 workspace；存在歧义时询问，不默选其他项目。
-2. 调用 `export-portal`，将输出放在 Git 仓库之外的新目录，不覆盖旧快照。
-3. 向用户返回生成的本地 HTML 链接；有浏览器能力时可打开该文件。
-4. 说明这是指定 revision 的离线快照；数据变化后重新生成，不返回旧页面冒充最新结果。
-5. 文件缺失、校验失败或 workspace 未登记时明确报告；没有记录就显示空状态，
-   不将历史笔记自动升级为已验证知识。
-6. 不提交、推送或上传数据库、HTML、JSON、截图、日志和私人知识。
-   不为了“展示知识”启动云端学习或额外 app 操作。
-
-这个协议是客户端可以采用的显式调用流程，不是已经安装的自动触发 hook。
-运行时完整性检查针对记录条件，不独立证明当前设备或后端环境仍然相同。
-
-实现入口：[knowledge.py](local_learning_runtime/knowledge.py)；
-CLI 入口：[cli.py](local_learning_runtime/cli.py)；
-回归测试：[test_runtime.py](tests/test_runtime.py)。
-
-## Architecture overview
-
-Solid connections below represent implemented local operations or explicit
-caller handoffs. Dashed connections represent planned integrations, not installed
-client hooks or automatic model calls. Android has a narrow real-emulator
-acceptance result as well as mock tests; iOS is still mock-tested only.
+Instead of dumping raw chat transcripts into a vector store, NooMesh enforces **strict salience separation at ingestion** and **cryptographic anchor verification at retrieval**:
 
 ```mermaid
-flowchart TD
-    Human["Human: question, review, approval"] --> Task["Explicit task contract<br/>workspace + platform + conditions"]
-    Clients["Supported client hooks / MCP / CLI<br/>explicit installation and trust required"] --> Task
-    Task --> Recall["Local runtime: deterministic recall"]
-    Recall --> Gate{"Conditions, anchors,<br/>evidence and dependencies valid?"}
-    Gate -->|Matching claims pass| Ready["LOCAL_READY<br/>JSON claims + conditions + revision"]
-    Ready --> Consumer["Human or agent consumes scoped knowledge"]
-    Gate -->|Stale or conflicted| Blocked["BLOCKED<br/>explain why reuse is unsafe"]
-    Gate -->|No match| Gap["NEEDS_INVESTIGATION<br/>deduplicated local question"]
-    Blocked --> Investigate["Explicit bounded investigation"]
-    Gap --> Investigate
-    Investigate --> Android["Android: approved journey runner<br/>UI assertions + restoration report"]
-    Investigate --> iOS["iOS simulator: screenshot capture<br/>no journey runner yet"]
-    Investigate --> Import["Explicit import<br/>trusted test JSON / UI XML / source anchors"]
-    Investigate --> Packet["Bounded learning packet<br/>no conversation history or model requests"]
-    Packet -. separately authorized, gateway planned .-> Model["Approved server model<br/>proposes scoped candidates"]
-    Model -. explicit submission .-> Candidate["Candidate claim"]
-    Android --> Evidence["Local content-addressed evidence"]
-    iOS --> Evidence
-    Import --> Evidence
-    Evidence --> Candidate
-    Candidate --> Verify["Registered local predicate checks<br/>JSON equality / unique UI node"]
-    Verify --> Policy["Preauthorized trusted producer<br/>automatic scoped publication"]
-    Policy --> Publish
-    Verify --> Review["Explicit human approval<br/>checks do not prove arbitrary prose"]
-    Human --> Review
-    Review --> Publish["Transactional publication<br/>expected revision + claim version"]
-    Publish --> DB["Private local SQLite<br/>claims + immutable snapshots + sessions"]
-    DB --> Recall
-    Evidence --> Recall
-    Next["New session / task boundary"] --> Recall
-    DB --> Portal["Offline read-only HTML + JSON catalog"]
-    Legacy["Existing private memo / knowledge graph<br/>not included in this repository"] --> Intake["Approved selected-node import<br/>UNVERIFIED_LEGACY; original status retained"]
-    Intake --> Portal
-    Intake -. requires new evidence and explicit proposal .-> Candidate
+flowchart LR
+    A["Debugging / Verification Turn"] --> B{"Salience & Attestation Gate"}
+    B -->|"Routine Tool Output<br/>(No Assertions)"| T["tool_traces<br/>(Bounded Diagnostic Log · Never Injected)"]
+    B -->|"Reviewed Source Contract<br/>(When + Rule + Trap + Symbols)"| M["Rule / Trap Memo<br/>(llr.memo.v1)"]
+    B -->|"Trusted Validator Pass<br/>(JSON / UI Predicates)"| C["Published Claim<br/>+ Immutable Evidence Blob"]
+    B -->|"Verified Parameterized Workflow<br/>(Preconditions P · Steps R · Checks Q)"| S["Zero-Model Solution<br/>(llr.solution.v1)"]
+
+    M & C & S --> STORE[("Canonical Dual-Layer Store<br/>Human Summary Title + Machine Contract")]
+
+    STORE --> NEXT["Next Session / Another Agent / Another Mac"]
+    NEXT --> VER{"Live Local Anchor &<br/>Freshness Check"}
+    VER -->|"Exact SHA-256 + Fresh"| PASS["APPLICABLE / LOCAL_SOLVED<br/>(0 Model Calls for P/R/Q)"]
+    VER -->|"File Edited, Declared Symbols Intact"| SOFT["SOFT_DRIFT<br/>(Reusable with Drift Notice)"]
+    VER -->|"Symbol Deleted / Expired / Missing Env"| BLK["BLOCKED<br/>(Fail-Closed · Prevents Hallucination)"]
+
+    PASS & SOFT --> LEDGER["Token Savings Gas Gauge<br/>(Net Saved = Avoided Exploration - Injected Overhead)"]
 ```
 
-### What is delivered and where knowledge lives
+### 3. Presence-Aware Mobile Continuation & Multi-Mac Routing
 
-| Layer | Delivered now | Boundary |
-|---|---|---|
-| Client interface | JSON CLI, stdio MCP, Copilot lifecycle adapter, trust-reviewed Codex desktop hooks | OpenClaw and unsupported clients use explicit APIs; no universal interception |
-| App observation | Android capture and bounded journey runner; iOS simulator capture | No real-device acceptance run yet; iOS navigation is not implemented |
-| Verification | Exact predicates, retained observation conditions, source/evidence fingerprints | Screenshots alone and model confidence cannot verify a claim |
-| Knowledge publication | Preauthorized trusted predicates publish automatically; other evidence remains candidate; version checks and invalidation | No automatic interpretation or promotion of legacy notes |
-| Cross-session use | Task search, recall, refresh; supported trusted hooks inject bounded context before each prompt | Callers supply current conditions; task completeness is not inferred |
-| Learning escalation | History-free, byte-bounded packet | No model gateway, spend enforcement or recurring scheduler |
-| Human access | Offline static HTML knowledge cards and matching JSON catalog | Export is a snapshot, not a live or hosted service |
-
-The GitHub repository delivers **generic software and synthetic tests**, not a
-project knowledge corpus. Persistent knowledge stays under `LLR_HOME` (default
-`~/.local-learning-runtime`):
-
-```text
-private runtime home/
-  runtime.sqlite   # observations, candidates, claims, snapshots, sessions, questions
-  evidence/        # immutable content-addressed observation blobs
-```
-
-Initialization creates this store; the demo does not populate it with real app
-knowledge. Explicit graph import copies selected notes as unverified history
-without modifying the original memo. Android and iOS retain independent workspace scopes.
-
-### Evidence-to-knowledge delivery workflow
+When you step away from your desk, NooMesh lets a single mobile Teams `Workflows` chat act as a remote command console across all your Macs—while automatically staying silent whenever you are actively using the keyboard/trackpad at that Mac:
 
 ```mermaid
 sequenceDiagram
-    actor Human
-    participant Agent as Human or agent CLI caller
-    participant Runtime as Local runtime
-    participant App as Authorized app / trusted test
-    participant Store as Private knowledge store
-    Human->>Agent: Define question, scope, permitted actions and expected result
-    Agent->>Runtime: recall(task, session)
-    Runtime->>Store: Read published revision; check evidence and dependencies
-    Runtime-->>Agent: LOCAL_READY / BLOCKED / NEEDS_INVESTIGATION
-    opt Explicitly approved investigation or revalidation
-        Agent->>Runtime: Execute Android recipe or import trusted results
-        Runtime->>App: Bounded actions and declared assertions
-        App-->>Runtime: UI or test observations
-        Runtime->>Store: Store evidence with artifact and environment conditions
-        Runtime-->>Agent: Goal result and separate restoration result
-        Agent->>Runtime: Propose scoped claim referencing evidence
-        Runtime-->>Agent: Candidate ID and local verification result
-        Human->>Agent: Review statement, evidence scope and approval
-        Agent->>Runtime: accept(candidate, expected version, expected revision)
-        Runtime->>Store: Atomically publish complete knowledge revision
-        Runtime-->>Agent: Published revision
+    actor User as Developer (Mac or Phone)
+    participant IDE as VS Code / Codex Session
+    participant Host as NooMesh Local Host
+    participant IOKit as macOS IOKit Presence
+    participant Teams as Microsoft Teams Workflows
+
+    IDE->>Host: Turn completed / ask_teams_choice
+    Host->>IOKit: Check IOConsoleUsers lock & HIDIdleTime
+    alt Active at Mac (< away_idle threshold)
+        IOKit-->>Host: User present at keyboard
+        Host-->>IDE: Suppress mobile push (zero duplicate noise)
+    else Screen locked or away (or mid-turn choice forced)
+        IOKit-->>Host: User away
+        Host->>Teams: Post Adaptive Card ([MachineName · Client #session])
+        User->>Teams: Submit choice or follow-up instruction on phone
+        Teams-->>Host: Poll run output (REPLIED + prompt)
+        Host-->>IDE: Resume exact session (SDK session.send / Stop decision:block)
     end
-    Agent->>Runtime: New session: recall current task and conditions
-    Runtime->>Store: Recheck applicability, anchors, evidence and dependencies
-    Runtime-->>Agent: Applicable knowledge, or explicit refusal to reuse
+    opt Proactive plain-text command from phone (no prior card)
+        User->>Teams: "@MacStudio #45e0c88c run tests and summarize"
+        Host->>Teams: Poll Workflows chat reader (ignore bot messages)
+        Host-->>IDE: Claim message on next idle heartbeat & execute immediately
+    end
 ```
 
-The investigation sequence illustrates the Android/trusted-test path. iOS
-capture only records a screenshot; trusted XCTest/XCUITest predicate results
-must be imported separately. A failed restoration cannot be presented as a
-fully successful journey, even if a narrower goal assertion passed.
+---
 
-## Requirements and quick start
+### 4. Core Architectural Mechanisms
 
-Python 3.9+; the runtime has no third-party dependencies. Run from this checkout:
+#### A. One Record, Two Synchronized Layers
+Human explanations and machine execution steps never drift apart because both are projected from the exact same versioned JSON/SQLite record:
+
+| Dimension | Human Layer (Menu Bar HUD & HTML Portal) | Machine Layer (MCP / Hooks / Local Executor) |
+|---|---|---|
+| **Identity & Intent** | `<Phenomenon / Scenario>: <Root Cause or Rule>` summary title | `workspace`, `platform`, `tags`, lexical salience tokens, `problem.patterns` |
+| **Applicability** | Clear scope chips & environment labels | Typed `conditions`, `file_sha256` preconditions, pinned dependency versions |
+| **Action / Guidance** | Scannable `When / Rule / Trap` cards | Bounded `inspect_file` / `run_validator` / `select` / `branch` steps (no arbitrary `eval`) |
+| **Trust & Integrity** | Live green/amber/red status dot (`Consistent` / `Soft Drift` / `Blocked`) + source links | `SHA-256` file digest + declared symbol survival check + immutable evidence check |
+| **Economic Proof** | 240° **Token Savings Gas Gauge** + 4-cell per-item Token Ledger | Measured turn telemetry (`input - cacheRead + output`) minus injected token overhead |
+
+#### B. Resilient Symbol Anchors (`PASS` vs `SOFT_DRIFT` vs `BLOCKED`)
+Pure `SHA-256` file pinning breaks the moment someone adds an unrelated method or comment to a 1,500-line file, whereas unanchored prose silently rots when an API is refactored. NooMesh solves both with `llr anchor <workspace> <file> --symbol <identifier>`:
+- **`PASS`**: File `SHA-256` matches the verified baseline and freshness policy (`memory_policies`) is valid.
+- **`SOFT_DRIFT`**: File `SHA-256` changed due to edits elsewhere in the file, **but every declared symbol still exists** in the file—knowledge remains usable with an explicit drift notice, and `llr dream-pass --apply --approve` can re-anchor it offline with zero LLM calls.
+- **`BLOCKED`**: Any declared symbol was removed/renamed, evidence failed integrity checks, or the freshness window expired—NooMesh fails closed and warns the agent instead of feeding stale advice.
+
+#### C. Honest Token Savings Accounting
+NooMesh never fabricates arbitrary "tokens saved" numbers:
+1. **Acquisition Baseline**: Recorded from explicit `--acquisition-tokens` / `llr token-record`, incremental non-cached Copilot turn telemetry (`events.jsonl` bounded step deltas), or conservative workspace anchor file inspection windows (capped at `32 KB` per file + tool roundtrip overhead).
+2. **Net Marginal Reuse**: `saved_tokens = max(0, acquisition_tokens - injected_tokens)` (`injected_tokens = 0` for zero-model `P/R/Q` executions).
+3. **Shared-Anchor Deduplication**: If a single turn retrieves both a `Memo` and a `Claim` anchored to the same `.kt` / `.py` / `.ts` source files, overlapping source files are counted **once** per turn batch—never double-counted.
+
+---
+
+## Essential CLI & MCP Reference
+
+### Everyday CLI Commands
+
+```sh
+# Workspace & client lifecycle
+llr setup <workspace> --root <path> --platform <android|ios|generic> --client <copilot|codex|codex-hooks> --approve
+llr register-alias --workspace <workspace> --root <monorepo_parent> --require-platform --approve
+llr host-status
+llr doctor
+llr host-stop
+
+# Authoring & consolidating dual-layer doctrine
+llr anchor <workspace> <relative_file_path> --symbol "<symbol_declaration>"
+llr memo-propose /private/path/memo.json --expected-version 0 --approve
+llr solution-propose /private/path/solution.json --expected-version 0 --approve
+llr dream-pass --workspace <workspace> --apply --approve
+llr prune-noise --approve --vacuum
+
+# Progressive retrieval & zero-model routing
+llr search --cwd <path> --query "<task>" --session <session_id>
+llr context --cwd <path> --query "<task>" --session <session_id> --level <0|1|2|3>
+llr route --cwd <path> --query "<exact_task>" --session <session_id>
+
+# macOS Liquid Glass Menu Bar HUD & offline HTML portal
+llr menubar-start --install-login-agent --approve
+llr menubar-status
+llr menubar-hits --hours 24
+llr menubar-open-portal --workspace <workspace>
+llr menubar-stop
+llr session-title --session <session_id> --title "<Phenomenon>: <Root cause / task summary>"
+
+# Optional Microsoft Teams mobile relay & proactive router
+pbpaste | llr relay-config --webhook-stdin --env-id "<ENV_ID>" --flow-id "<FLOW_ID>" \
+  --machine-name "MacStudio" --away-only --away-idle 60 --auto-on-stop --approve
+pbpaste | llr inbox-config --reader-stdin --poll-seconds 6 --default-cwd "<path>" --allow-new-sessions --approve
+```
+
+### Exposed MCP Tools (`local_learning` server)
+
+| MCP Tool | Purpose |
+|---|---|
+| `local_learning_search` | Salience-gated search across `Memo`, `Claim`, and candidate milestones for the discovered workspace. |
+| `local_experience_context` | Progressive `L0 / L1 / L2 / L3` memory packets with pinned knowledge revisions and byte-bounded pagination. |
+| `local_experience_route` | Deterministic check whether an approved `P/R/Q` contract covers the exact request and parameter enum. |
+| `local_experience_execute` | Execute a verified `P/R/Q` contract locally (`model_calls = 0`) with full pre/postcondition proof recording. |
+| `local_learning_dream` | Read-only offline consolidation report (symbol-anchor drift, theme link/bloat checks, `fail -> pass` episodes). |
+| `local_learning_maintenance` | Inspect aging items, freshness windows, and observed reuse priorities. |
+| `local_learning_validators` / `local_learning_validate` | Discover and execute pre-authorized app/workspace validators with automatic evidence & claim publication. |
+| `local_learning_status` | Inspect task-run milestone capture and publication state. |
+| `local_learning_ask_choice` | Dispatch an interactive Adaptive Card to Teams Workflows and await a mobile decision across Macs & IDEs. |
+
+---
+
+## Explicit Trust & Safety Boundaries
+
+- **Ships generic engine code, never personal memories**: `runtime.sqlite`, `evidence/`, `portal-live/`, webhook configurations, and logs live strictly under private `0700` `~/.local-learning-runtime` outside Git. Attempting to initialize a state directory inside a Git repository is rejected.
+- **Local storage vs. cloud prompt injection**: `P/R/Q` contract execution (`llr solution-execute` and Codex `--local-first-readonly` gates) performs zero model calls; when an IDE injects retrieved `L0/L2` summaries into a cloud-hosted model, those sanitized summaries are sent to your configured model provider.
+- **Similarity never authorizes execution**: Fuzzy search surfaces context for human/agent judgment; automated `P/R/Q` execution requires an exact pattern match, approved enum parameters, and passing live preconditions.
+- **Multi-Mac portability requires local re-attestation**: Never copy a live running SQLite file across machines while active. Exported or synced doctrine carries repo-relative anchors and must pass local checkout verification (`PASS` / `SOFT_DRIFT`) on the receiving Mac before reuse.
+
+---
+
+## Development & Verification
+
+Pure Python 3.9+ with zero third-party runtime dependencies:
 
 ```sh
 python3 -m unittest discover -s tests -v
 python3 -m examples.demo
-python3 -m local_learning_runtime --home /absolute/private/state init
+python3 -m examples.agent_demo
+python3 -m examples.lifecycle_demo --output /tmp/noomesh-lifecycle
 ```
-
-The demo uses fictional data in an automatically removed temporary directory.
-It publishes a claim, recalls it across separate store instances, and proves
-that changing a source anchor blocks reuse. Unit tests also cover a fresh CLI
-process, publication rollback, replay deduplication, conflicts, tampered evidence,
-platform separation, device locks, and failed restoration.
-
-Optional installation: `python3 -m pip install -e .`, then use `llr` instead of
-`python3 -m local_learning_runtime`.
-
-Use an absolute `--home` before each command, or set `LLR_HOME`. The default is
-`~/.local-learning-runtime`, outside the code repository. Keep state, screenshots,
-logs, account data, and app artifacts out of Git, even in a private repository.
-Local OS permissions/encryption remain the owner's responsibility.
-
-## Learning lifecycle
-
-```text
-explicit question + environment
-  -> deterministic recall
-  -> local observation / bounded investigation
-  -> proposed claim
-  -> predicate checks + human review approval
-  -> compare-and-swap publication in one SQLite transaction
-  -> next session recall and applicability checks
-```
-
-Evidence is copied to content-addressed local blobs. Candidates and snapshots
-are immutable and fingerprinted. SQLite transactions publish the complete
-snapshot and current revision together; interrupted publication cannot expose
-a partial revision. Failed checks cannot promote a candidate.
-
-Every claim is scoped to one registered workspace/platform and an observed
-artifact fingerprint. Conditions are exact, typed, conjunctive matches, not
-semantic similarity. Source anchors are workspace-relative and checked on
-publication and recall. Dependencies pin claim versions; updating or invalidating
-a dependency blocks dependent claims until reviewed again.
-
-Publication requires retaining every recorded evidence condition, not merely
-the artifact fingerprint. Dropping an account, flag, or OS condition would
-broaden the observation's scope and is rejected. Multiple observations can
-support a claim only when their recorded conditions agree exactly.
-
-## Register a workspace
-
-```sh
-python3 -m local_learning_runtime register sample/android \
-  --root /absolute/path/to/android-checkout --platform android
-python3 -m local_learning_runtime register sample/ios \
-  --root /absolute/path/to/ios-checkout --platform ios
-python3 -m local_learning_runtime anchor sample/android relative/source.txt
-```
-
-Registration stores paths locally; it does not scan, upload, or mutate the repo.
-Android verification never grants iOS verification. A registered ID cannot be
-silently rebound to another directory or platform.
-
-## Evidence and claims
-
-Create a local conditions file containing at least `artifact_sha256` (64
-lowercase hex digits), and relevant scalar conditions such as account category,
-locale, known flags, and OS version. Never store passwords or tokens.
-
-Import a result explicitly:
-
-```sh
-python3 -m local_learning_runtime observe --workspace sample/android \
-  --event unique-run-result --conditions /private/conditions.json \
-  --file /private/results.json --type application/json
-```
-
-Supported evidence: JSON, Android UI XML, and PNG observations. JSON must be
-produced by a trusted test or reviewed by a human; this runtime cannot prove that
-an arbitrary imported JSON assertion genuinely came from an app. PNG alone
-cannot pass a deterministic verification check.
-
-A candidate specification:
-
-```json
-{
-  "id": "theme-dark",
-  "workspace": "sample/android",
-  "task_type": "theme",
-  "statement": "Under the recorded conditions, the selected theme is Dark.",
-  "conditions": {
-    "artifact_sha256": "<replace with real 64-character fingerprint>",
-    "account_kind": "test"
-  },
-  "anchors": [],
-  "checks": [
-    {
-      "kind": "json_equals",
-      "evidence_id": "<returned evidence ID>",
-      "pointer": "/selected_theme",
-      "expected": "Dark"
-    }
-  ],
-  "dependencies": []
-}
-```
-
-Use nonempty source anchors when claiming a relationship with code. An empty
-anchor list is allowed for a scoped runtime observation; it does not establish
-which source revision produced the app.
-
-`json_equals` compares a JSON pointer with an exact typed expected value.
-`ui_node` requires exactly one matching node:
-
-```json
-{
-  "kind": "ui_node",
-  "evidence_id": "<UI evidence ID>",
-  "selector": {"resource-id": "com.example.app:id/theme"},
-  "attributes": {"text": "Dark", "selected": "true"}
-}
-```
-
-Predicates do not mechanically prove arbitrary prose. Review the statement's
-scope and relationship to its checks before approval. UI/source correlation
-does not prove a specific call stack executed.
-
-```sh
-python3 -m local_learning_runtime propose /private/claim.json
-python3 -m local_learning_runtime verify CANDIDATE_ID
-python3 -m local_learning_runtime accept CANDIDATE_ID \
-  --expected-version 0 --expected-revision none --approve
-```
-
-For later publication, use the current revision from recall and the existing
-claim version (or 0 for a new claim). Stale compare-and-swap values fail instead
-of silently overwriting another session. Identical reviewed publication is NOOP.
-
-Contradictory observations do not automatically refute existing claims. Submit
-and review their scope, then explicitly mark the old claim conflicted or stale:
-
-```sh
-python3 -m local_learning_runtime invalidate theme-dark \
-  --lifecycle conflicted --reason "Describe the conflicting evidence" \
-  --expected-version 1 --expected-revision REVISION --approve
-```
-
-Historical snapshots remain readable; invalidated claims cannot satisfy recall.
-
-## Running Android journeys
-
-Requires `adb`, an explicit device serial, an installed test app, and approval.
-Do not use a production account. This runtime never signs in for you.
-
-Read-only capture of an already visible app:
-
-```sh
-python3 -m local_learning_runtime capture-android \
-  --workspace sample/android --device SERIAL --app com.example.app \
-  --context /private/context.json --approve
-```
-
-The context file excludes `artifact_sha256`: the adapter calculates a sorted
-multi-APK identity from installed APK hashes. It records API level and package,
-checks the identity again afterward, captures XML/PNG, and requires the requested
-package to appear in the XML. XML and screenshot are sequential observations,
-not an atomic snapshot. Capture does not execute a user journey.
-
-Approved recipe execution:
-
-```sh
-python3 -m local_learning_runtime run-android /private/recipe.json --approve
-```
-
-Recipe shape (IDs below are fictional):
-
-```json
-{
-  "workspace": "sample/android",
-  "device": "SERIAL",
-  "app": "com.example.app",
-  "context": {"account_kind": "test"},
-  "steps": [
-    {"action": "launch"},
-    {"action": "assert_node", "resource_id": "com.example.app:id/home",
-     "attributes": {"enabled": "true"}}
-  ],
-  "restore": [
-    {"action": "assert_node", "resource_id": "com.example.app:id/home",
-     "attributes": {"enabled": "true"}}
-  ]
-}
-```
-
-Allowed actions: `launch`, `restart` (force-stop and relaunch), `back`,
-`tap_node`, `assert_node`. Tap uses a unique enabled app node's resource ID and
-bounds, not model-provided shell commands. Node discovery retries at most five
-times. Each command has a timeout; lists have at most 32 steps per phase.
-This is a bounded runner, not an automatic explorer or a universal UI test tool.
-
-**Review the entire recipe before approval.** A tap can alter privacy settings,
-delete data, or initiate a paid request; semantic button safety cannot be inferred
-from its ID. Such actions need separate user consent. No typing, arbitrary
-commands, install, consent dismissal, or permission-grant operations are exposed.
-
-Restoration runs even when goal execution fails. Tapping recipes require explicit
-restoration steps. Restoration is PASS only with a successful restoration
-assertion; otherwise it is NOT_VERIFIED or FAIL. Overall PARTIAL is not success.
-Goal evidence remains separately usable after review, even when restoration fails.
-App relaunch is not claimed to be a reboot or a full OS process-death experiment.
-
-Device operations are mutually exclusive within one state directory. A killed
-process leaves a lock; confirm it stopped before explicit recovery:
-
-```sh
-python3 -m local_learning_runtime unlock-device android:SERIAL --approve
-```
-
-Other tools/state directories are not covered by this lock. Use a dedicated
-device or external exclusive runner for stronger isolation.
-
-## iOS
-
-`capture-ios` uses `xcrun simctl` with an explicit simulator UUID:
-
-```sh
-python3 -m local_learning_runtime capture-ios \
-  --workspace sample/ios --device SIMULATOR_UUID --app com.example.app \
-  --context /private/context.json --approve
-```
-
-It hashes the installed app bundle and captures a screenshot. It does not prove
-the app is foreground, navigate UI, or promote the image to a verified claim.
-Import JSON predicates from a trusted XCTest/XCUITest runner for verification.
-Physical iOS devices and an XCUITest journey runner are not implemented yet.
-
-## New sessions and learning gaps
-
-Task file:
-
-```json
-{
-  "workspace": "sample/android",
-  "task_type": "theme",
-  "conditions": {
-    "artifact_sha256": "<current artifact fingerprint>",
-    "account_kind": "test"
-  }
-}
-```
-
-```sh
-python3 -m local_learning_runtime recall /private/task.json --session session-b
-python3 -m local_learning_runtime refresh --session session-b
-python3 -m local_learning_runtime questions
-python3 -m local_learning_runtime learning-packet /private/task.json \
-  --question "Which exact condition remains unverified?"
-```
-
-Recall returns LOCAL_READY only for matching published claims whose evidence,
-anchors, and dependencies still pass. Any stale matching claim makes the result
-BLOCKED, even when another claim passes. No match returns NEEDS_INVESTIGATION and
-deduplicates a local queue item. This proves registered predicate applicability,
-not complete coverage of the user's task or deterministic natural-language understanding.
-
-`refresh` reports changed versions and anchor/evidence drift; it does not silently
-switch an existing session's knowledge packet. Recall again to adopt a revision
-and recheck the actual environment. Callers supply environment conditions; this
-core does not independently attest account state or remote flags.
-
-Learning packets contain one bounded question and at most four matching claim
-summaries, with omission counts. They exclude conversation history and reject
-packets above 12000 UTF-8 bytes. This is a byte cap, not a token or spend cap.
-Use an explicitly authorized fresh model session only when needed. Review and
-redact any internal data before sending it to an approved provider.
-
-## VS Code / Codex / OpenClaw integration
-
-### 同一 checkout，不同 VS Code session 如何找到同一份知识
-
-知识不存放在聊天历史中。每个 session 都通过相同的 `LLR_HOME` 读取本地数据库，
-用当前目录匹配已登记的 workspace，再获取同一 published revision。
-
-从任意工作目录调用仓库自带 launcher，无需先 `cd` 到 runtime 或安装 Python 包：
-
-```sh
-python3 /absolute/path/NooMesh/tools/llr.py \
-  discover --cwd /absolute/path/to/project --session unique-session-id
-```
-
-`discover` 按真实目录边界匹配，优先最具体的登记根目录。相同目录对应多个平台时
-返回 `AMBIGUOUS`，可用 `--platform android` 或 `--platform ios` 消歧；未登记目录
-返回 `UNKNOWN_WORKSPACE`，不会因为路径字符串前缀相似就读取其他项目。
-
-结果包含 workspace、state_home、知识 revision、发布知识 ID、任务类型及未验证历史
-大纲；每类最多显示 16 个条目并报告遗漏数。它不会把“找到了知识”当成“当前条件下
-可直接执行”。下一步：
-
-桌面 App 可能打开整个 monorepo/project 根目录，而不是登记的子模块目录。
-可显式登记包含原 checkout 的父目录别名，保持源码锚点根目录不变：
-
-```sh
-python3 /absolute/path/NooMesh/tools/llr.py register-alias \
-  --workspace sample/android --root /absolute/path/to/project-root \
-  --require-platform --approve
-```
-
-父目录别名建议要求平台。`search` 只在实际问题明确且唯一提到 Android/安卓或
-iOS/苹果时消歧；未提平台、同时提两个平台时不会默选。别名不能指向无关目录或
-文件系统根目录，也不自动登记其他 checkout。必须在真实桌面 App 中验证：
-终端 CLI 从子目录成功，不代表 App 从项目根目录也能成功。
-
-```sh
-python3 /absolute/path/NooMesh/tools/llr.py \
-  catalog --workspace RETURNED_WORKSPACE
-```
-
-真正复用结论仍需 `recall` 和当前条件。每次发现会记录独立 session 读取凭据，
-用于比较不同 session 是否访问了同一个知识库和 revision。
-
-可复用的个人指令模板在
-[adapters/vscode-session.instructions.md](adapters/vscode-session.instructions.md)。
-替换模板路径后，安装到当前客户端实际支持的用户指令位置；不要提交本机路径或
-私人数据。示例 Copilot CLI 用户入口为 `~/.copilot/instructions/`，其他 VS Code
-provider/profile 的位置和加载状态需单独确认。
-
-验收必须分开：
-
-1. **数据层**：不同工作目录中的独立 CLI 进程返回相同 workspace/revision/知识 ID。
-2. **入口层**：实际新 VS Code chat 能看到用户指令，并调用 discover/catalog。
-3. **使用层**：新 session 引用正确知识且保留条件与未验证状态。
-
-进程测试不等于真实 chat 验收；指令已保存也不等于每次必然调用。本地代码无法
-保证模型自觉遵守，强制执行需要客户端 hook 或受控执行网关。
-
-All three can invoke the same CLI and consume JSON. Client configurations are
-only installed with explicit approval; never silently installed or modified.
-
-1. Explicitly normalize the task into the task schema.
-2. Run recall before planning or after compaction.
-3. Use LOCAL_READY claims within their declared scope.
-4. Stop controlled execution on BLOCKED; investigate NEEDS_INVESTIGATION.
-5. For an authorized new question, pass only the learning packet to a fresh session.
-6. Submit structured candidates, verify, review, and publish.
-7. Refresh at task boundaries.
-
-Do not let a model-provided summary or confidence score bypass checks. Plain
-instructions/MCP availability cannot guarantee invocation. Global enforcement
-requires a client-owned execution gateway or isolated worktree plus acceptance
-gate; neither is supplied by this CLI. Source code in a trusted local process can
-alter the database, so these checks are not an adversarial sandbox.
-
-## Current boundaries
-
-- No autonomous learning scheduler, model calls, spend gateway, or automatic
-  authentication. Model budget remains paused unless separately approved.
-- No semantic retrieval, complete dependency discovery, automatic source tracing,
-  or dedicated VS Code extension. MCP retrieval and a preapproved validator
-  registry are implemented; they do not authorize arbitrary commands.
-- No automatic promotion or modification of existing private memo stores.
-- No global guarantee that a server-hosted chat uses zero model calls; only this
-  runtime's local operations make zero model requests.
-- Android launch, capture, restart assertions and cross-process knowledge reuse
-  have passed one authorized real emulator acceptance run. That narrow result
-  does not validate every Android feature, device, account, or iOS adapter.
-
-## Automatic task milestones (v0.2)
-
-The normal supported path does **not** require a follow-up "save knowledge"
-request. Use a previously approved runtime validator to do the task; its result
-is minimized, mechanically checked, persisted and indexed as part of execution.
-
-```mermaid
-flowchart LR
-    P["New task"] --> H["Trusted prompt hook<br/>bounded local search"]
-    H --> A["Agent: approved runtime validator"]
-    A --> E["Actual tested values + runtime identity"]
-    E --> V{"Producer trusted,<br/>predicates pass,<br/>no conflict?"}
-    V -->|yes, preauthorized| D["Publish local claim + revision"]
-    V -->|no| C["Candidate / explicit failure reason"]
-    D --> G["Graph projection from same database"]
-    D --> N["Next session prompt hook"]
-```
-
-### Preauthorization, once per workspace and runner
-
-```sh
-python3 -m local_learning_runtime authorize-local --workspace sample/android --approve
-python3 -m local_learning_runtime register-runner example /private/runner.json \
-  --workspace sample/android --approve
-```
-
-An approved runner has an absolute executable, fixed argv, conditions, explicit
-JSON pointer predicates, source anchors and a task title. Executable and file
-arguments are fingerprinted. A changed executable or file is rejected before
-running. Approval authorizes that exact runtime action, **not** new commands,
-App purchases, consent changes, extra agents or model calls.
-
-```json
-{
-  "argv": ["/absolute/python3", "/private/approved-runtime-check.py"],
-  "title": "Example panel visible after launch",
-  "conditions": {"artifact_sha256": "<recorded fingerprint>"},
-  "conditions_pointer": "/conditions",
-  "checks": [{"pointer": "/visible", "expected": true}],
-  "anchors": []
-}
-```
-
-`conditions_pointer` is optional. When supplied, the trusted producer returns
-the actual installed artifact/environment identity, instead of reusing a static
-registration-time identity. Missing or changed conditions never establish
-compatibility with historical knowledge.
-
-Clients discover `local_learning_validators`, then invoke
-`local_learning_validate` with task/session/milestone identifiers. The tool
-cannot register a new runner or broaden its scope. Direct CLI equivalent:
-
-```sh
-python3 -m local_learning_runtime run-validator example --workspace sample/android \
-  --session session-a --task task-one --milestone checkpoint-one
-```
-
-Preauthorized `run-android` journeys also produce automatic milestones; pass
-`--session` and `--task` to associate them with the current client task.
-The generic `probe-android-node` producer supports fixed, approved launch and
-unique/enabled-node checks; project/package/node values belong in private runner
-configuration, never in the product implementation.
-
-### Outcome, authority and retry semantics
-
-Session, task and milestone are separate IDs. One session can have many tasks,
-each with several checkpoints. Schema:
-[milestone.v1.schema.json](schemas/milestone.v1.schema.json).
-
-- Trusted runtime producers + passing scoped predicates + local preauthorization:
-  automatic publication, no per-observation approval click.
-- External structured events, code inference, user evidence, screenshots alone
-  and hypotheses: durable candidates, not automatically verified facts.
-- FAIL, PARTIAL, INCONCLUSIVE or a missing predicate: no success promotion.
-- Nonpassing runtime outcomes remain durable candidates even when predicate
-  values are absent. Timeout and unusable-output diagnostics are retained without
-  raw stdout/stderr; these outcomes are not publication/storage failures.
-  A producer reporting PASS must still supply every required predicate.
-- Sensitive predicate values changed by redaction: publication refused.
-- Explicit contradictions/supersessions: candidate pending human reconciliation;
-  related old knowledge is blocked from automatic search reuse.
-- Assistant "done" text and tool transport success: never runtime success.
-- Same task/milestone payload: idempotent. Changed payload: reject; use a new
-  milestone rather than overwrite prior evidence.
-- A publication failure leaves a SAVE_FAILED record and explicit reason;
-  the same event can be retried after the error is fixed.
-- Trusted eligible events have a private local integrity attestation. A repeated
-  validator invocation reuses its existing result; `retry-milestone EVENT_ID`
-  retries publication from stored evidence without re-executing the App.
-  Concurrent invocation IDs are reserved before execution. An interrupted
-  invocation with unknown outcome is reported, not silently rerun.
-- SQLite publication is transactional. Candidate collection and publication
-  are separately observable phases; a collected file is not a published claim.
-
-Memo, conditions, operations and evidence relations are projected from the same
-authoritative database. `graph` does not maintain another independently editable
-fact store. Supported links include supports, contradicts, supersedes and
-depends_on; relations require existing same-workspace observations.
-
-```sh
-python3 -m local_learning_runtime task-status
-python3 -m local_learning_runtime graph --workspace sample/android
-python3 -m local_learning_runtime search --cwd /project \
-  --query "actual business question" --session session-b
-```
-
-Search returns at most four summaries within 8000 UTF-8 bytes. No supplied current
-conditions means CONDITIONS_UNKNOWN, not unconditional reuse. It includes
-provenance, evidence IDs and revision. Full evidence is expanded only as needed.
-Runtime is the published-observation authority; Userbot is supplemental legacy
-background. Reading only Userbot cannot count as reading newly published runtime
-knowledge.
-
-### Installed client adapters and trigger guarantees
-
-```sh
-python3 -m local_learning_runtime install-client copilot \
-  --runtime-root /absolute/NooMesh --profile ~/.copilot --approve
-python3 -m local_learning_runtime install-client codex \
-  --runtime-root /absolute/NooMesh --profile ~/.codex --approve
-python3 -m local_learning_runtime install-client codex-hooks \
-  --runtime-root /absolute/NooMesh --profile ~/.codex --approve
-```
-
-| Client path | Actual integration | Guarantee boundary |
-|---|---|---|
-| VS Code Copilot Agent Host / Copilot CLI | User lifecycle hooks + MCP search/approved validation | Verify the selected harness loads hooks; other VS Code providers have different schemas |
-| Codex desktop with supported hooks | UserPromptSubmit injects bounded relevant knowledge; PostToolUse records minimal checkpoints; Stop reports status | New hooks require actual client trust review; never bypass trust |
-| Older Codex CLI without hooks | MCP plus user instruction; chained existing notify preserved | Prompt retrieval selection is advisory; notify alone does not capture all validation output |
-| Other clients | CLI/MCP and structured milestone API | No lifecycle guarantee until an adapter is installed and actually verified |
-
-The supported hook path injects relevant knowledge before model reasoning,
-rather than hoping the model chooses a recall command. Hooks can be disabled,
-untrusted, or fail due to environment problems; these are explicit unsupported/
-failure states, not successful recall. An LLM can still misinterpret evidence:
-controlled execution and predicate checks enforce behavior, not universal
-semantic correctness of every answer.
-
-Ordinary PostToolUse capture keeps minimal tool status and at most 16 bounded
-debugger assignments, not whole conversations or arbitrary raw output.
-They remain candidates because arbitrary stdout is not trusted attestation.
-Stop/notify never infer success from the assistant's last message, do not launch
-experiments, and do not retry a model in a loop.
-
-### Privacy, durable evidence and deletion
-
-Automatic producers store only values actually used by registered predicates,
-not unrelated stdout fields. Known token, receipt, signature, email, order,
-device and account identifiers are redacted with private keyed markers; distinct
-private conditions remain distinct. Evidence must retain its tested value:
-if a predicate relies on a redacted field, it cannot be silently marked PASS.
-This deterministic sanitizer is not a universal PII detector. Unstructured
-text and new sensitive formats need reviewed minimization, not auto-promotion.
-
-Historical debugger files can be imported as line-located assignments:
-
-```sh
-python3 -m local_learning_runtime import-debugger /private/old-debugger.log \
-  --workspace sample/android --session source-session --task source-task \
-  --title "Scoped historical observation" --approve
-```
-
-Only necessary assignments and provenance are retained locally; a historical
-log, unknown artifact or old screenshot is not current runtime verification.
-Runtime evidence is copied into private content-addressed blobs, independent
-of temporary session files.
-
-```sh
-python3 -m local_learning_runtime forget-workspace --workspace sample/android --approve
-```
-
-Deletion revokes associated historical snapshots and removes authoritative
-memo/graph/evidence. Separately exported HTML/JSON, original imports and OS
-backups remain owner-managed. Deletion does not revoke runner authorization.
-Generated portal JSON includes task-level states and the graph projection.
-
-The runtime makes zero model requests and never starts recurring learning.
-Existing client model use remains subject to user/provider authorization and
-billing; this software does not implement a provider spend gateway.
-
-### Actual closed-loop acceptance
-
-On 2026-10-14, a new real VS Code Copilot task executed an approved Android
-runtime validator. No "save knowledge" instruction was appended: the validation
-tool automatically captured, checked and published a new object-specific claim.
-A completely new **Codex desktop App** conversation then received that claim
-from a trusted UserPromptSubmit hook, with no knowledge IDs, paths or recall
-commands in the business question. It cited the exact runtime object,
-conditions and evidence, while retaining CONDITIONS_UNKNOWN for the current
-environment. The consumer made zero explicit retrieval tool calls: injection
-was driven by the client lifecycle hook, not model selection.
-
-This acceptance also caught and fixed parent-project directory discovery,
-invalid milestone rejection before App actions, and insufficient object identity
-in result summaries. CLI sessions and desktop sessions are separate acceptance
-surfaces; their results are not interchangeable. The private report and raw
-evidence stay on the local machine. The repository contains only generic code,
-schemas, adapters, documentation and synthetic regression tests.
-
-The guarantee applies to installed/trusted supported hooks and preauthorized
-validator paths. Arbitrary tools, disabled hooks and unregistered workspaces
-remain explicit gaps, not universal success.
-
-## Selected legacy knowledge intake
-
-```sh
-python3 -m local_learning_runtime import-graph /private/graph.json \
-  --workspace sample/android --node J05 --node F06 --approve
-python3 -m local_learning_runtime catalog --workspace sample/android
-```
-
-The input is a JSON object with a `nodes` list; nodes have unique IDs. At most
-16 selected nodes are copied per call, each at most 12000 UTF-8 bytes. Source
-fingerprint, scope, recorded source revision, original status, and full selected
-node body are retained. Repeated imports of the same selection/revision deduplicate.
-Import never creates an active claim or a passing verification; a historical
-`partial` or `observed` node stays `UNVERIFIED_LEGACY` in the new runtime.
-New runtime evidence, predicate checks, a scoped proposal, and approval are
-required for publication.
-
-## Human knowledge portal and agent catalog
-
-```sh
-python3 -m local_learning_runtime export-portal --workspace sample/android \
-  --output /private/portal/revision-1
-```
-
-Open the returned `index.html` locally in a browser. Its sibling `catalog.json`
-contains the same claims, revision, unverified legacy intake, unpublished
-candidates, and investigation queue for agent consumption. Published claims
-include local integrity status. Conditions remain recorded conditions, not an
-attestation of the current device. Referenced evidence is embedded in the page
-after fingerprint checking, with a 32 MiB total evidence cap.
-
-The human view uses Chinese knowledge cards: conclusions, reuse limits,
-historical gaps and next actions appear first. Conditions, IDs and raw evidence
-are collapsed by default. Evidence links show readable labels and relevant UI
-nodes rather than a full XML dump. The agent JSON retains the original schema.
-Only the exact registered restart-acceptance statement receives a deterministic
-Chinese explanation; other statements are preserved rather than guessed or
-translated by a model.
-
-The portal is static, read-only, offline, escaped HTML with no scripts or remote
-assets. Choose a fresh output directory for each export; existing files are not
-overwritten. Re-export after publication or source/evidence drift. The HTML and
-JSON can contain private data: do not commit, host publicly, or upload them.
-Agent execution must still use `recall`; the catalog is not an execution permit.
-
-## Reproducible real Android acceptance
-
-```sh
-python3 -m local_learning_runtime acceptance-android \
-  --workspace sample/android --device SERIAL --app com.example.app \
-  --resource-id com.example.app:id/navigation \
-  --context /private/context.json --output /private/acceptance/run-1 --approve
-```
-
-First inspect the installed test app and choose one unique stable enabled UI
-node. This command intentionally launches and force-stops/relaunches that app,
-but does not tap buttons, send messages, log in, or change privacy settings.
-Use a dedicated approved emulator/account; relaunching a production app can
-still affect an in-progress user task.
-
-The command:
-
-1. Runs launch -> node assertion -> restart -> node assertion.
-2. Separately verifies the same non-mutated observable UI postcondition.
-   It does not restore unobserved draft or backend state.
-3. Stores real UI XML and the goal/restoration report with installed artifact identity.
-4. Publishes only the narrow declared UI observation after approval and checks.
-5. Starts an independent CLI process to recall that claim.
-6. Starts another process with a changed artifact and requires BLOCKED.
-7. Proposes a deliberately false predicate, requires rejection, and checks that
-   the published revision did not change.
-8. Exports the offline human portal and JSON catalog, plus `acceptance.json`.
-
-This is an actual device runner, not a mocked demo. The local output includes
-the recipe, journey, task, changed task, acceptance report and portal. Evidence
-remains in the private runtime store. A failed/partial journey stops publication
-and leaves its report for investigation. Claims do not assert source execution
-or authenticated account identity.
-
-An authorized API35 emulator acceptance on 2026-10-10 passed all eight steps.
-Real execution exposed two issues missed by mocks: `monkey` launch failed on
-that emulator, and randomized APK paths used `~~`. The adapter now resolves and
-starts the launcher via Activity Manager and permits valid randomized paths;
-both have regression tests. Private app details and evidence are not in this repo.
