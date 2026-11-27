@@ -20,9 +20,22 @@ from .privacy import sanitize
 MAX_EVENT_BYTES = 128_000
 RELATIONS = {"supports", "contradicts", "supersedes", "depends_on"}
 EN_STOPWORDS = {
-    "a", "i", "an", "and", "are", "as", "at", "be", "by", "can", "for", "from",
-    "how", "in", "is", "it", "of", "on", "or", "that", "the", "this", "to",
-    "what", "why", "with", "android", "ios", "officemobile",
+    "a", "i", "an", "and", "are", "as", "at", "be", "been", "being", "by", "can",
+    "could", "did", "do", "does", "done", "for", "from", "had", "has", "have", "how",
+    "if", "in", "into", "is", "it", "its", "may", "might", "must", "no", "nor", "not",
+    "of", "on", "only", "or", "other", "our", "out", "over", "per", "same", "shall",
+    "should", "so", "some", "such", "than", "that", "the", "their", "them", "then",
+    "there", "these", "they", "this", "those", "through", "to", "too", "under", "up",
+    "upon", "very", "via", "was", "we", "were", "what", "when", "where", "which",
+    "while", "who", "whom", "why", "will", "with", "within", "without", "would",
+    "you", "your", "also", "just", "now", "after", "before", "between", "during",
+    "all", "any", "both", "each", "more", "most", "android", "ios", "officemobile",
+}
+LOW_SALIENCE_TERMS = {
+    "pr", "ui", "fix", "bug", "issue", "error", "test", "tests", "debug", "build",
+    "run", "get", "set", "new", "old", "use", "used", "using", "keep", "avoid",
+    "check", "verify", "update", "add", "remove", "change", "code", "file", "files",
+    "app", "true", "false", "value", "status", "result", "state", "data",
 }
 ZH_STOP_PHRASES = (
     "看一下", "帮我看", "看下", "请问", "为什么", "是什么", "有什么", "怎么", "如何",
@@ -382,7 +395,10 @@ def graph(store: Store, workspace: str) -> Dict[str, Any]:
 
 def tokenize(text: str) -> set:
     lower = text.lower()
-    words = {word for word in re.findall(r"[a-z0-9_]+", lower) if word not in EN_STOPWORDS}
+    words = {
+        word for word in re.findall(r"[a-z0-9_]+", lower)
+        if len(word) >= 2 and word not in EN_STOPWORDS
+    }
     cleaned = lower
     for phrase in ZH_STOP_PHRASES:
         cleaned = cleaned.replace(phrase, " ")
@@ -390,6 +406,25 @@ def tokenize(text: str) -> set:
     for part in re.findall(r"[\u4e00-\u9fff]{2,}", cleaned):
         words.update(part[i:i + 2] for i in range(len(part) - 1))
     return words - set(ZH_STOP_PHRASES)
+
+
+def relevance_score(query_terms: set, doc_terms: set,
+                    header_terms: Optional[set] = None) -> int:
+    overlap = query_terms & doc_terms
+    if not overlap:
+        return 0
+    specific_query = query_terms - LOW_SALIENCE_TERMS
+    specific_overlap = overlap - LOW_SALIENCE_TERMS
+    if specific_query and not specific_overlap:
+        return 0
+    if len(specific_query) >= 4 and len(specific_overlap) == 1:
+        sole = next(iter(specific_overlap))
+        is_identifier = len(sole) >= 9 or "_" in sole
+        in_header = bool(header_terms and sole in header_terms)
+        if not (is_identifier or in_header):
+            return 0
+    header_bonus = len(specific_overlap & header_terms) if header_terms else 0
+    return len(overlap) + header_bonus
 
 
 def search(store: Store, cwd: Path, query: str, session: str,
@@ -409,8 +444,12 @@ def search(store: Store, cwd: Path, query: str, session: str,
         if claim["spec"]["workspace"] != workspace:
             continue
         spec = claim["spec"]
-        score = len(terms & tokenize(spec["task_type"] + " " + spec["statement"] + " "
-                                    + spec.get("provenance", {}).get("title", "")))
+        header_str = claim_id + " " + spec["task_type"] + " " + spec.get("provenance", {}).get("title", "")
+        score = relevance_score(
+            terms,
+            tokenize(header_str + " " + spec["statement"]),
+            tokenize(header_str),
+        )
         if score == 0:
             continue
         reuse = "CONDITIONS_UNKNOWN"
@@ -452,8 +491,12 @@ def search(store: Store, cwd: Path, query: str, session: str,
             sym for anchor_item in spec["verification"]["anchors"]
             for sym in anchor_item.get("symbols", []))
         tag_text = " ".join(spec.get("tags", []))
-        score = len(terms & tokenize(" ".join((spec["title"], spec["when"], spec["rule"],
-                                               spec["trap"], tag_text, symbol_text))))
+        header_str = " ".join((row["id"], spec["title"], tag_text, symbol_text))
+        score = relevance_score(
+            terms,
+            tokenize(" ".join((header_str, spec["when"], spec["rule"], spec["trap"]))),
+            tokenize(header_str),
+        )
         if score == 0:
             continue
         reuse, reason, drift = "APPLICABLE", "Source/symbol anchors verified on current checkout.", []
@@ -481,7 +524,11 @@ def search(store: Store, cwd: Path, query: str, session: str,
         body = json.loads(row["body"])
         if is_empty_tool_milestone(body):
             continue
-        score = len(terms & tokenize(body["title"] + " " + canonical(body["observation"])))
+        score = relevance_score(
+            terms,
+            tokenize(body["title"] + " " + canonical(body["observation"])),
+            tokenize(body["title"]),
+        )
         if score:
             candidates.append((score, {"id": row["id"], "kind": body["kind"], "title": body["title"],
                                        "summary": canonical(body["observation"])[:1500],

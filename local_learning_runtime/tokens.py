@@ -63,6 +63,7 @@ def probe_copilot_turn_tokens(session_id: Optional[str]) -> Optional[int]:
         if events_file.stat().st_size > 32 * 1024 * 1024:
             return None
         turn_tokens = 0
+        prev_inp = 0
         saw_usage = False
         with events_file.open("r", encoding="utf-8", errors="ignore") as handle:
             for line in handle:
@@ -82,12 +83,15 @@ def probe_copilot_turn_tokens(session_id: Optional[str]) -> Optional[int]:
                             inp = int(usage.get("inputTokens", 0) or 0)
                             cached = int(usage.get("cacheReadTokens", 0) or 0)
                             out = int(usage.get("outputTokens", 0) or 0)
-                            incremental = max(0, inp - cached) + max(0, out)
+                            step_delta = max(0, inp - prev_inp) if (prev_inp > 0 and inp >= prev_inp) else min(max(0, inp - cached), 24_000)
+                            non_cached = max(0, inp - cached) if cached > 0 else step_delta
+                            incremental = min(non_cached, step_delta) + max(0, out)
+                            prev_inp = inp
                             turn_tokens += incremental
                             saw_usage = True
                     except (TypeError, ValueError):
                         continue
-        if saw_usage and 200 <= turn_tokens <= 500_000:
+        if saw_usage and 200 <= turn_tokens <= 120_000:
             return turn_tokens
     except OSError:
         return None

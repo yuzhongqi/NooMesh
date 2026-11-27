@@ -358,6 +358,81 @@ class MenuBarDashboardTests(unittest.TestCase):
         self.assertEqual(promoted_order[0], "sess-order-00")
         self.assertEqual(promoted_order[1:], [s for s in baseline_order if s != "sess-order-00"])
 
+    def test_search_salience_blocks_stopword_and_generic_filler_false_hits(self):
+        # Publish an unrelated Kotlin hygiene rule containing 'no-op', 'PR', and 'debug'.
+        propose_memo(self.store, {
+            "schema": "llr.memo.v1",
+            "id": "kotlin-abi-hygiene",
+            "workspace": "demo/android",
+            "kind": "rule",
+            "title": "Kotlin contracts and PR review hygiene",
+            "when": "Preparing a Kotlin PR in debug or release builds",
+            "rule": "Revert no-op diffs and member reorderings before opening a PR.",
+            "trap": "Leaving no-op edits creates noisy diffs.",
+            "tags": ["kotlin", "abi"],
+            "acquisition_tokens": 18_500,
+            "verification": {
+                "method": "source_symbol_contract",
+                "summary": "Verified Initializer contract",
+                "anchors": [{
+                    "path": "Initializer.kt",
+                    "sha256": file_digest(self.anchor_file),
+                    "symbols": ["Initializer"],
+                }],
+            },
+        }, expected_version=0, approve=True)
+
+        # 1) Query with 'no' ('no network') and unrelated DNS terms must NOT false-match 'no-op'!
+        miss_dns = search(
+            self.store, self.android_repo,
+            "emulator simulator DNS no network paywall",
+            "sess-salience-1",
+            actual={"platform": "android"},
+        )
+        self.assertEqual(miss_dns["status"], "NO_MATCH")
+        self.assertEqual(miss_dns["matches"], [])
+
+        # 2) Query sharing ONLY generic filler words ('PR', 'debug') must NOT false-match either!
+        miss_generic = search(
+            self.store, self.android_repo,
+            "X64 Debug LKG pipeline PR SyncTo failure",
+            "sess-salience-2",
+            actual={"platform": "android"},
+        )
+        self.assertEqual(miss_generic["status"], "NO_MATCH")
+
+        # 3) Publishing the real emulator DNS trap memo matches immediately as #1!
+        propose_memo(self.store, {
+            "schema": "llr.memo.v1",
+            "id": "emulator-dns-deadlock",
+            "workspace": "demo/android",
+            "kind": "trap",
+            "title": "Android emulator DNS deadlock on network switch",
+            "when": "Switching host Wi-Fi networks causes emulator no network or paywall timeout",
+            "rule": "Turn private_dns_mode off, stop orphan netsimd, and pass active host nameserver.",
+            "trap": "Orphan netsimd keeps forwarding DNS to stale router gateway.",
+            "tags": ["emulator", "dns", "netsimd", "paywall", "network"],
+            "acquisition_tokens": 22_000,
+            "verification": {
+                "method": "incident_fix",
+                "summary": "Verified across host Wi-Fi transitions",
+                "anchors": [{
+                    "path": "Initializer.kt",
+                    "sha256": file_digest(self.anchor_file),
+                    "symbols": ["Initializer"],
+                }],
+            },
+        }, expected_version=0, approve=True)
+
+        hit_dns = search(
+            self.store, self.android_repo,
+            "emulator simulator DNS no network paywall",
+            "sess-salience-3",
+            actual={"platform": "android"},
+        )
+        self.assertEqual(hit_dns["status"], "FOUND")
+        self.assertEqual([m["id"] for m in hit_dns["matches"]], ["emulator-dns-deadlock"])
+
 
 if __name__ == "__main__":
     unittest.main()

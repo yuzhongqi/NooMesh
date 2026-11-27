@@ -39,7 +39,8 @@ def sanitize(value: Any, key: bytes) -> Tuple[Any, List[str]]:
             for name, child in item.items():
                 require(isinstance(name, str), "Privacy input keys must be strings")
                 child_path = path + "/" + name.replace("~", "~0").replace("/", "~1")
-                if SENSITIVE_KEY.search(name):
+                is_token_count_metric = type(child) is int and name.lower().endswith("_tokens")
+                if SENSITIVE_KEY.search(name) and not is_token_count_metric:
                     changed.append(child_path)
                     result[name] = marker(child, key)
                 else:

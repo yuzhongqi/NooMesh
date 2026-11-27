@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .core import Store, RuntimeErrorBase, canonical, digest, identifier, now, object_fields, require
 from .discovery import discover, infer_platform
-from .learning import is_empty_tool_milestone, tokenize
+from .learning import is_empty_tool_milestone, relevance_score, tokenize
 from .lifecycle import assess, reference as memory_reference, record as record_usage
 
 PLATFORM_ANCHORS = {
@@ -270,7 +270,11 @@ def packet(store: Store, cwd: Path, query: str, session: str, level: int = 2,
                         selected_ids.update(neighbor["members"])
         ranked = []
         for node_id, item in workspace_nodes.items():
-            score = len(terms & tokenize(item["title"] + " " + item["summary"]))
+            score = relevance_score(
+                terms,
+                tokenize(node_id + " " + item["title"] + " " + item["summary"]),
+                tokenize(node_id + " " + item["title"]),
+            )
             if node_id in selected_ids:
                 score += 2
             if score:
@@ -449,7 +453,11 @@ def session_index(store: Store, cwd: Path, query: str, session: str,
         if terms:
             matched: List[Tuple[Tuple[Any, ...], Dict[str, Any], Dict[str, Any]]] = []
             for node_id, item in workspace_nodes.items():
-                score = len(terms & tokenize(item["title"] + " " + item["summary"]))
+                score = relevance_score(
+                    terms,
+                    tokenize(node_id + " " + item["title"] + " " + item["summary"]),
+                    tokenize(node_id + " " + item["title"]),
+                )
                 if not score:
                     continue
                 reuse = ("CONDITIONS_UNKNOWN" if item["kind"] == "claim"
