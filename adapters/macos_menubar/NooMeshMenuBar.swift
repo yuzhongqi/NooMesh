@@ -601,6 +601,110 @@ final class DashboardViewModel: ObservableObject {
     }
 }
 
+// MARK: - Custom NooMesh Hex-Core Lattice Vector Glyph
+
+struct NooMeshGlyphView: View {
+    let size: CGFloat
+
+    var body: some View {
+        Canvas { ctx, sz in
+            let c = CGPoint(x: sz.width / 2.0, y: sz.height / 2.0)
+            let r = min(sz.width, sz.height) * 0.40
+            let lw = max(1.35, min(sz.width, sz.height) * 0.082)
+
+            func pt(_ deg: Double, _ rad: CGFloat) -> CGPoint {
+                let a = deg * .pi / 180.0
+                return CGPoint(x: c.x + CGFloat(cos(a)) * rad, y: c.y - CGFloat(sin(a)) * rad)
+            }
+
+            let hexAngles = [90.0, 30.0, -30.0, -90.0, -150.0, 150.0]
+            var hex = Path()
+            hex.move(to: pt(hexAngles[0], r))
+            for a in hexAngles.dropFirst() {
+                hex.addLine(to: pt(a, r))
+            }
+            hex.closeSubpath()
+            ctx.stroke(hex, with: .foreground, style: StrokeStyle(lineWidth: lw, lineCap: .round, lineJoin: .round))
+
+            let primaryNodes = [90.0, -30.0, -150.0]
+            var spokes = Path()
+            for a in primaryNodes {
+                spokes.move(to: pt(a, r * 0.34))
+                spokes.addLine(to: pt(a, r * 0.88))
+            }
+            ctx.stroke(spokes, with: .foreground, style: StrokeStyle(lineWidth: lw * 0.92, lineCap: .round))
+
+            let coreR = max(1.9, r * 0.22)
+            ctx.fill(
+                Path(ellipseIn: CGRect(x: c.x - coreR, y: c.y - coreR, width: coreR * 2.0, height: coreR * 2.0)),
+                with: .foreground
+            )
+
+            let nodeR = max(1.55, r * 0.175)
+            for a in primaryNodes {
+                let p = pt(a, r)
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: p.x - nodeR, y: p.y - nodeR, width: nodeR * 2.0, height: nodeR * 2.0)),
+                    with: .foreground
+                )
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+func makeNooMeshStatusBarImage(pointSize: CGFloat = 17.5) -> NSImage {
+    let size = NSSize(width: pointSize, height: pointSize)
+    let image = NSImage(size: size, flipped: false) { rect in
+        let c = NSPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) * 0.40
+        let lw = max(1.35, min(rect.width, rect.height) * 0.082)
+
+        func pt(_ deg: Double, _ rad: CGFloat) -> NSPoint {
+            let a = deg * .pi / 180.0
+            return NSPoint(x: c.x + CGFloat(cos(a)) * rad, y: c.y + CGFloat(sin(a)) * rad)
+        }
+
+        NSColor.black.setStroke()
+        NSColor.black.setFill()
+
+        let hexAngles = [90.0, 30.0, -30.0, -90.0, -150.0, 150.0]
+        let hex = NSBezierPath()
+        hex.lineWidth = lw
+        hex.lineCapStyle = .round
+        hex.lineJoinStyle = .round
+        hex.move(to: pt(hexAngles[0], r))
+        for a in hexAngles.dropFirst() {
+            hex.line(to: pt(a, r))
+        }
+        hex.close()
+        hex.stroke()
+
+        let primaryNodes = [90.0, -30.0, -150.0]
+        let spokes = NSBezierPath()
+        spokes.lineWidth = lw * 0.92
+        spokes.lineCapStyle = .round
+        for a in primaryNodes {
+            spokes.move(to: pt(a, r * 0.34))
+            spokes.line(to: pt(a, r * 0.88))
+        }
+        spokes.stroke()
+
+        let coreR = max(1.85, r * 0.22)
+        NSBezierPath(ovalIn: NSRect(x: c.x - coreR, y: c.y - coreR, width: coreR * 2.0, height: coreR * 2.0)).fill()
+
+        let nodeR = max(1.5, r * 0.175)
+        for a in primaryNodes {
+            let p = pt(a, r)
+            NSBezierPath(ovalIn: NSRect(x: p.x - nodeR, y: p.y - nodeR, width: nodeR * 2.0, height: nodeR * 2.0)).fill()
+        }
+        return true
+    }
+    image.isTemplate = true
+    image.accessibilityDescription = "NooMesh 本地知识状态"
+    return image
+}
+
 // MARK: - Liquid Glass Optical Tokens & Modifiers
 
 enum GlassPalette {
@@ -2142,8 +2246,7 @@ struct DashboardPopoverView: View {
                             color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.07),
                             radius: 4, x: 0, y: 2
                         )
-                    Image(systemName: "brain.head.profile")
-                        .font(.system(size: 15.5, weight: .medium))
+                    NooMeshGlyphView(size: 19)
                         .foregroundColor(GlassPalette.primaryLabel)
                 }
 
@@ -2335,13 +2438,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            let symbolCfg = NSImage.SymbolConfiguration(pointSize: 13.5, weight: .medium)
-            let img = NSImage(
-                systemSymbolName: "brain.head.profile",
-                accessibilityDescription: "NooMesh 本地知识状态"
-            )?.withSymbolConfiguration(symbolCfg)
-            img?.isTemplate = true
-            button.image = img
+            button.image = makeNooMeshStatusBarImage(pointSize: 17.5)
             button.imagePosition = .imageLeading
             button.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
             button.target = self
