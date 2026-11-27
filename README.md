@@ -302,8 +302,8 @@ Microsoft Teams **Workflows** webhook notifies your personal chat (for example
     when you prefix `/new [@workspace] <prompt>` or when no live session is open,
     and replies with `/sessions` when asked to list open sessions.
   - **Native macOS Menu Bar live dashboard (`llr menubar-*`):** Compile and launch a
-    zero-Dock-icon Liquid Glass status bar utility (custom forge-cog & bionic
-    servo-cranium template glyph + live 24h knowledge-hit counter) featuring a **Token Savings Gas Gauge**
+    zero-Dock-icon Liquid Glass status bar utility (custom Iron-Halo & astral
+    star-cog template glyph + live 24h knowledge-hit counter) featuring a **Token Savings Gas Gauge**
     (cumulative net saved tokens, 24h delta, acquisition-cost ROI multiple, and
     shared-anchor deduplication), active IDE tasks with per-session & per-item saved
     token badges, clickable `24h 命中` analytics, click-to-inspect full knowledge

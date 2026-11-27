@@ -601,7 +601,7 @@ final class DashboardViewModel: ObservableObject {
     }
 }
 
-// MARK: - Custom NooMesh Forge-Cog & Bionic Servo-Cranium Vector Glyph
+// MARK: - Custom NooMesh Iron-Halo & Astral Star-Cog Vector Glyph
 
 struct NooMeshGlyphView: View {
     let size: CGFloat
@@ -609,82 +609,53 @@ struct NooMeshGlyphView: View {
     var body: some View {
         Canvas { ctx, sz in
             let c = CGPoint(x: sz.width / 2.0, y: sz.height / 2.0)
-            let outerR = min(sz.width, sz.height) * 0.47
-            let rootR = outerR * 0.78
-            let innerRimR = outerR * 0.61
+            let outerR = min(sz.width, sz.height) * 0.48
+            let cogR = outerR * 0.82
+            let rootR = outerR * 0.66
+            let holeR = outerR * 0.49
 
-            // 1. Heavy 8-tooth industrial forge-cog ring (even-odd hollow interior)
-            var ring = Path()
-            let teeth = 8
-            let step = (2.0 * Double.pi) / Double(teeth)
-            let halfTooth = step * 0.44 * 0.5
-            let bevel = step * 0.06
-            for i in 0..<teeth {
+            // 1. Alternating 4 Cardinal Iron-Halo Spires + 4 Diagonal Forge-Cog Teeth
+            var halo = Path()
+            let total = 8
+            let step = (2.0 * Double.pi) / Double(total)
+            for i in 0..<total {
                 let base = Double(i) * step - Double.pi / 2.0
-                let p1 = CGPoint(x: c.x + CGFloat(cos(base - halfTooth - bevel)) * rootR,
-                                 y: c.y + CGFloat(sin(base - halfTooth - bevel)) * rootR)
-                let p2 = CGPoint(x: c.x + CGFloat(cos(base - halfTooth)) * outerR,
-                                 y: c.y + CGFloat(sin(base - halfTooth)) * outerR)
-                let p3 = CGPoint(x: c.x + CGFloat(cos(base + halfTooth)) * outerR,
-                                 y: c.y + CGFloat(sin(base + halfTooth)) * outerR)
-                let p4 = CGPoint(x: c.x + CGFloat(cos(base + halfTooth + bevel)) * rootR,
-                                 y: c.y + CGFloat(sin(base + halfTooth + bevel)) * rootR)
-                if i == 0 { ring.move(to: p1) } else { ring.addLine(to: p1) }
-                ring.addLine(to: p2)
-                ring.addLine(to: p3)
-                ring.addLine(to: p4)
+                if i % 2 == 0 {
+                    let w = step * 0.21
+                    let p1 = CGPoint(x: c.x + CGFloat(cos(base - w)) * rootR, y: c.y + CGFloat(sin(base - w)) * rootR)
+                    let tip = CGPoint(x: c.x + CGFloat(cos(base)) * outerR, y: c.y + CGFloat(sin(base)) * outerR)
+                    let p2 = CGPoint(x: c.x + CGFloat(cos(base + w)) * rootR, y: c.y + CGFloat(sin(base + w)) * rootR)
+                    if i == 0 { halo.move(to: p1) } else { halo.addLine(to: p1) }
+                    halo.addLine(to: tip)
+                    halo.addLine(to: p2)
+                } else {
+                    let w = step * 0.23
+                    let b = step * 0.05
+                    let p1 = CGPoint(x: c.x + CGFloat(cos(base - w - b)) * rootR, y: c.y + CGFloat(sin(base - w - b)) * rootR)
+                    let p2 = CGPoint(x: c.x + CGFloat(cos(base - w)) * cogR, y: c.y + CGFloat(sin(base - w)) * cogR)
+                    let p3 = CGPoint(x: c.x + CGFloat(cos(base + w)) * cogR, y: c.y + CGFloat(sin(base + w)) * cogR)
+                    let p4 = CGPoint(x: c.x + CGFloat(cos(base + w + b)) * rootR, y: c.y + CGFloat(sin(base + w + b)) * rootR)
+                    halo.addLine(to: p1)
+                    halo.addLine(to: p2)
+                    halo.addLine(to: p3)
+                    halo.addLine(to: p4)
+                }
             }
-            ring.closeSubpath()
-            ring.addEllipse(in: CGRect(x: c.x - innerRimR, y: c.y - innerRimR, width: innerRimR * 2.0, height: innerRimR * 2.0))
-            ctx.fill(ring, with: .foreground, style: FillStyle(eoFill: true))
+            halo.closeSubpath()
+            halo.addEllipse(in: CGRect(x: c.x - holeR, y: c.y - holeR, width: holeR * 2.0, height: holeR * 2.0))
+            ctx.fill(halo, with: .foreground, style: FillStyle(eoFill: true))
 
-            // 2. Inner Split Human/Bionic Servo-Cranium
-            let craniumR = outerR * 0.43
-            let domeCenter = CGPoint(x: c.x, y: c.y - outerR * 0.06)
-            var skull = Path()
-            skull.addArc(center: domeCenter, radius: craniumR, startAngle: .degrees(165), endAngle: .degrees(15), clockwise: false)
-            skull.addLine(to: CGPoint(x: c.x + craniumR * 0.62, y: c.y + outerR * 0.22))
-            skull.addLine(to: CGPoint(x: c.x + craniumR * 0.48, y: c.y + outerR * 0.41))
-            skull.addLine(to: CGPoint(x: c.x - craniumR * 0.48, y: c.y + outerR * 0.41))
-            skull.addLine(to: CGPoint(x: c.x - craniumR * 0.62, y: c.y + outerR * 0.22))
-            skull.closeSubpath()
-
-            let eyeY = c.y + outerR * 0.02
-            let leftEyeR = outerR * 0.115
-            skull.addEllipse(in: CGRect(
-                x: c.x - outerR * 0.24 - leftEyeR,
-                y: eyeY - leftEyeR * 0.85,
-                width: leftEyeR * 2.0,
-                height: leftEyeR * 1.7
-            ))
-
-            let rightEyeR = outerR * 0.148
-            let rightEyeCenter = CGPoint(x: c.x + outerR * 0.17, y: eyeY)
-            skull.addEllipse(in: CGRect(
-                x: rightEyeCenter.x - rightEyeR,
-                y: rightEyeCenter.y - rightEyeR,
-                width: rightEyeR * 2.0,
-                height: rightEyeR * 2.0
-            ))
-
-            let notchW = max(0.85, outerR * 0.075)
-            let notchH = outerR * 0.14
-            for nx in [-outerR * 0.10, outerR * 0.10] {
-                skull.addRect(CGRect(x: c.x + nx - notchW / 2.0, y: c.y + outerR * 0.28, width: notchW, height: notchH))
-            }
-            ctx.fill(skull, with: .foreground, style: FillStyle(eoFill: true))
-
-            // Bionic optical target pin inside the right augmetic eye
-            let pinR = max(0.65, rightEyeR * 0.36)
-            ctx.fill(
-                Path(ellipseIn: CGRect(
-                    x: rightEyeCenter.x - pinR,
-                    y: rightEyeCenter.y - pinR,
-                    width: pinR * 2.0,
-                    height: pinR * 2.0
-                )),
-                with: .foreground
-            )
+            // 2. Central 4-Point Astral Noosphere Spark
+            let d = holeR * 0.62
+            let k = d * 0.28
+            var star = Path()
+            star.move(to: CGPoint(x: c.x, y: c.y - d))
+            star.addQuadCurve(to: CGPoint(x: c.x + d, y: c.y), control: CGPoint(x: c.x + k, y: c.y - k))
+            star.addQuadCurve(to: CGPoint(x: c.x, y: c.y + d), control: CGPoint(x: c.x + k, y: c.y + k))
+            star.addQuadCurve(to: CGPoint(x: c.x - d, y: c.y), control: CGPoint(x: c.x - k, y: c.y + k))
+            star.addQuadCurve(to: CGPoint(x: c.x, y: c.y - d), control: CGPoint(x: c.x - k, y: c.y - k))
+            star.closeSubpath()
+            ctx.fill(star, with: .foreground)
         }
         .frame(width: size, height: size)
     }
@@ -694,78 +665,63 @@ func makeNooMeshStatusBarImage(pointSize: CGFloat = 18.5) -> NSImage {
     let size = NSSize(width: pointSize, height: pointSize)
     let image = NSImage(size: size, flipped: true) { rect in
         let c = NSPoint(x: rect.midX, y: rect.midY)
-        let outerR = min(rect.width, rect.height) * 0.47
-        let rootR = outerR * 0.78
-        let innerRimR = outerR * 0.61
+        let outerR = min(rect.width, rect.height) * 0.48
+        let cogR = outerR * 0.82
+        let rootR = outerR * 0.66
+        let holeR = outerR * 0.49
 
         NSColor.black.setFill()
 
-        let ring = NSBezierPath()
-        ring.windingRule = .evenOdd
-        let teeth = 8
-        let step = (2.0 * Double.pi) / Double(teeth)
-        let halfTooth = step * 0.44 * 0.5
-        let bevel = step * 0.06
-        for i in 0..<teeth {
+        let halo = NSBezierPath()
+        halo.windingRule = .evenOdd
+        let total = 8
+        let step = (2.0 * Double.pi) / Double(total)
+        for i in 0..<total {
             let base = Double(i) * step - Double.pi / 2.0
-            let pts = [
-                (base - halfTooth - bevel, rootR),
-                (base - halfTooth, outerR),
-                (base + halfTooth, outerR),
-                (base + halfTooth + bevel, rootR)
-            ].map { NSPoint(x: c.x + CGFloat(cos($0.0)) * $0.1, y: c.y + CGFloat(sin($0.0)) * $0.1) }
-            if i == 0 { ring.move(to: pts[0]) } else { ring.line(to: pts[0]) }
-            ring.line(to: pts[1])
-            ring.line(to: pts[2])
-            ring.line(to: pts[3])
+            if i % 2 == 0 {
+                let w = step * 0.21
+                let p1 = NSPoint(x: c.x + CGFloat(cos(base - w)) * rootR, y: c.y + CGFloat(sin(base - w)) * rootR)
+                let tip = NSPoint(x: c.x + CGFloat(cos(base)) * outerR, y: c.y + CGFloat(sin(base)) * outerR)
+                let p2 = NSPoint(x: c.x + CGFloat(cos(base + w)) * rootR, y: c.y + CGFloat(sin(base + w)) * rootR)
+                if i == 0 { halo.move(to: p1) } else { halo.line(to: p1) }
+                halo.line(to: tip)
+                halo.line(to: p2)
+            } else {
+                let w = step * 0.23
+                let b = step * 0.05
+                let p1 = NSPoint(x: c.x + CGFloat(cos(base - w - b)) * rootR, y: c.y + CGFloat(sin(base - w - b)) * rootR)
+                let p2 = NSPoint(x: c.x + CGFloat(cos(base - w)) * cogR, y: c.y + CGFloat(sin(base - w)) * cogR)
+                let p3 = NSPoint(x: c.x + CGFloat(cos(base + w)) * cogR, y: c.y + CGFloat(sin(base + w)) * cogR)
+                let p4 = NSPoint(x: c.x + CGFloat(cos(base + w + b)) * rootR, y: c.y + CGFloat(sin(base + w + b)) * rootR)
+                halo.line(to: p1)
+                halo.line(to: p2)
+                halo.line(to: p3)
+                halo.line(to: p4)
+            }
         }
-        ring.close()
-        ring.appendOval(in: NSRect(x: c.x - innerRimR, y: c.y - innerRimR, width: innerRimR * 2.0, height: innerRimR * 2.0))
-        ring.fill()
+        halo.close()
+        halo.appendOval(in: NSRect(x: c.x - holeR, y: c.y - holeR, width: holeR * 2.0, height: holeR * 2.0))
+        halo.fill()
 
-        let craniumR = outerR * 0.43
-        let domeCenter = NSPoint(x: c.x, y: c.y - outerR * 0.06)
-        let skull = NSBezierPath()
-        skull.windingRule = .evenOdd
-        skull.appendArc(withCenter: domeCenter, radius: craniumR, startAngle: 165, endAngle: 375, clockwise: false)
-        skull.line(to: NSPoint(x: c.x + craniumR * 0.62, y: c.y + outerR * 0.22))
-        skull.line(to: NSPoint(x: c.x + craniumR * 0.48, y: c.y + outerR * 0.41))
-        skull.line(to: NSPoint(x: c.x - craniumR * 0.48, y: c.y + outerR * 0.41))
-        skull.line(to: NSPoint(x: c.x - craniumR * 0.62, y: c.y + outerR * 0.22))
-        skull.close()
-
-        let eyeY = c.y + outerR * 0.02
-        let leftEyeR = outerR * 0.115
-        skull.appendOval(in: NSRect(
-            x: c.x - outerR * 0.24 - leftEyeR,
-            y: eyeY - leftEyeR * 0.85,
-            width: leftEyeR * 2.0,
-            height: leftEyeR * 1.7
-        ))
-
-        let rightEyeR = outerR * 0.148
-        let rightEyeCenter = NSPoint(x: c.x + outerR * 0.17, y: eyeY)
-        skull.appendOval(in: NSRect(
-            x: rightEyeCenter.x - rightEyeR,
-            y: rightEyeCenter.y - rightEyeR,
-            width: rightEyeR * 2.0,
-            height: rightEyeR * 2.0
-        ))
-
-        let notchW = max(0.85, outerR * 0.075)
-        let notchH = outerR * 0.14
-        for nx in [-outerR * 0.10, outerR * 0.10] {
-            skull.appendRect(NSRect(x: c.x + nx - notchW / 2.0, y: c.y + outerR * 0.28, width: notchW, height: notchH))
+        let d = holeR * 0.62
+        let k = d * 0.28
+        func addQuad(_ path: NSBezierPath, from p0: NSPoint, to p1: NSPoint, control ctrl: NSPoint) {
+            let cp1 = NSPoint(x: p0.x + (2.0 / 3.0) * (ctrl.x - p0.x), y: p0.y + (2.0 / 3.0) * (ctrl.y - p0.y))
+            let cp2 = NSPoint(x: p1.x + (2.0 / 3.0) * (ctrl.x - p1.x), y: p1.y + (2.0 / 3.0) * (ctrl.y - p1.y))
+            path.curve(to: p1, controlPoint1: cp1, controlPoint2: cp2)
         }
-        skull.fill()
-
-        let pinR = max(0.65, rightEyeR * 0.36)
-        NSBezierPath(ovalIn: NSRect(
-            x: rightEyeCenter.x - pinR,
-            y: rightEyeCenter.y - pinR,
-            width: pinR * 2.0,
-            height: pinR * 2.0
-        )).fill()
+        let top = NSPoint(x: c.x, y: c.y - d)
+        let right = NSPoint(x: c.x + d, y: c.y)
+        let bottom = NSPoint(x: c.x, y: c.y + d)
+        let left = NSPoint(x: c.x - d, y: c.y)
+        let star = NSBezierPath()
+        star.move(to: top)
+        addQuad(star, from: top, to: right, control: NSPoint(x: c.x + k, y: c.y - k))
+        addQuad(star, from: right, to: bottom, control: NSPoint(x: c.x + k, y: c.y + k))
+        addQuad(star, from: bottom, to: left, control: NSPoint(x: c.x - k, y: c.y + k))
+        addQuad(star, from: left, to: top, control: NSPoint(x: c.x - k, y: c.y - k))
+        star.close()
+        star.fill()
         return true
     }
     image.isTemplate = true
