@@ -369,7 +369,7 @@ def evaluate_hit_events(store: Store,
     rows = store.db.execute(
         "SELECT id,workspace,kind,subject,event,session,source,occurred_at "
         "FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed') "
-        "ORDER BY occurred_at ASC"
+        "AND session != 'bundle-import' ORDER BY occurred_at ASC"
     ).fetchall()
 
     # Track seen anchor files and orientation within (session, minute_bucket) so paired Memo+Claim

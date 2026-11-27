@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from .bundle import export_bundle, import_bundle, inspect_bundle, list_conflicts
 from .core import (MAX_EVIDENCE_BYTES, RuntimeErrorBase, Store, file_digest,
                    require, verify_anchor, workspace_file)
 from .devices import android_capture, ios_capture, run_android_recipe
@@ -369,6 +370,20 @@ def parser() -> argparse.ArgumentParser:
     sess_title = commands.add_parser("session-title")
     sess_title.add_argument("--session", required=True)
     sess_title.add_argument("--title", required=True)
+    b_exp = commands.add_parser("bundle-export")
+    b_exp.add_argument("--workspace")
+    b_exp.add_argument("--output", type=Path)
+    b_exp.add_argument("--include-runtime-claims", action="store_true")
+    b_exp.add_argument("--machine-name")
+    b_exp.add_argument("--approve", action="store_true")
+    b_insp = commands.add_parser("bundle-inspect")
+    b_insp.add_argument("bundle", type=Path)
+    b_imp = commands.add_parser("bundle-import")
+    b_imp.add_argument("bundle", type=Path)
+    b_imp.add_argument("--workspace")
+    b_imp.add_argument("--approve", action="store_true")
+    b_conf = commands.add_parser("bundle-conflicts")
+    b_conf.add_argument("--workspace")
     acceptance = commands.add_parser("acceptance-android")
     acceptance.add_argument("--workspace", required=True)
     acceptance.add_argument("--device", required=True)
@@ -626,6 +641,18 @@ def dispatch(store: Store, args: argparse.Namespace) -> Any:
         return open_live_portal(store, workspace=args.workspace, open_browser=not args.no_open)
     if args.command == "session-title":
         return set_session_display_title(store, args.session, args.title)
+    if args.command == "bundle-export":
+        return export_bundle(
+            store, workspace=args.workspace, output=args.output,
+            include_runtime_claims=args.include_runtime_claims,
+            machine_name=args.machine_name, approve=args.approve,
+        )
+    if args.command == "bundle-inspect":
+        return inspect_bundle(args.bundle)
+    if args.command == "bundle-import":
+        return import_bundle(store, args.bundle, target_workspace=args.workspace, approve=args.approve)
+    if args.command == "bundle-conflicts":
+        return list_conflicts(store, workspace=args.workspace)
     if args.command == "acceptance-android":
         return android_acceptance(store, args.workspace, args.device, args.app, args.resource_id,
                                   read_json(args.context), args.output, args.approve)
@@ -708,8 +735,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             from .mcp import serve_bridge
             serve_bridge(args.home)
             return 0
+        elif args.command == "bundle-inspect":
+            output = inspect_bundle(args.bundle)
         elif args.command in ("menubar-snapshot", "menubar-hits", "menubar-item", "menubar-status",
-                              "menubar-start", "menubar-stop", "menubar-open-portal", "session-title"):
+                              "menubar-start", "menubar-stop", "menubar-open-portal", "session-title",
+                              "bundle-export", "bundle-import", "bundle-conflicts"):
             store = Store(args.home)
             try:
                 output = dispatch(store, args)

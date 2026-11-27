@@ -3,6 +3,7 @@ import Combine
 import Darwin
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Snapshot Models
 
@@ -250,6 +251,44 @@ struct HitsBreakdownReport: Decodable {
     let copy_markdown: String
 }
 
+struct BundleExportCounts: Decodable {
+    let memos: Int
+    let claims: Int
+    let solutions: Int
+    let themes: Int
+    let acquisition_tokens: Int
+}
+
+struct BundleExportManifest: Decodable {
+    let workspace: String
+    let counts: BundleExportCounts
+}
+
+struct BundleExportResponse: Decodable {
+    let status: String
+    let bundle_path: String
+    let size_bytes: Int
+    let manifest: BundleExportManifest
+}
+
+struct BundleImportCounts: Decodable {
+    let imported: Int
+    let fast_forwarded: Int
+    let noop: Int
+    let conflicts: Int
+    let applicable: Int
+    let soft_drift: Int
+    let branch_mismatch: Int
+    let inherited_acquisition_tokens: Int
+}
+
+struct BundleImportResponse: Decodable {
+    let status: String
+    let workspace: String
+    let origin_machine: String
+    let counts: BundleImportCounts
+}
+
 // MARK: - CLI Configuration
 
 struct RuntimeCLI {
@@ -324,6 +363,7 @@ final class DashboardViewModel: ObservableObject {
 
     let cli: RuntimeCLI
     var onStatusBarChange: ((MenuBarSnapshot?) -> Void)?
+    var onSuspendAutoDismiss: ((Bool) -> Void)?
     private var timer: Timer?
     private var fetchInFlight = false
     private var detailCache: [String: KnowledgeItemDetail] = [:]
@@ -464,6 +504,105 @@ final class DashboardViewModel: ObservableObject {
                 self?.isBusyAction = false
                 self?.showTemporaryToast("已完成离线锚点巡检与整理")
                 self?.refreshNow()
+            }
+        }
+    }
+
+    func shareBundleViaAirDrop() {
+        guard !isBusyAction else { return }
+        guard let ws = snapshot?.primary_workspace, !ws.isEmpty else {
+            showTemporaryToast("暂无已注册工作区可导出")
+            return
+        }
+        isBusyAction = true
+        toastMessage = "正在打包 .noomesh 可共享经验包…"
+        let localCLI = cli
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = localCLI.executeJSON(["bundle-export", "--workspace", ws, "--approve"])
+            let decoded: BundleExportResponse? = data.flatMap {
+                try? JSONDecoder().decode(BundleExportResponse.self, from: $0)
+            }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isBusyAction = false
+                guard let exp = decoded else {
+                    self.showTemporaryToast("导出 .noomesh 经验包失败")
+                    return
+                }
+                let fileURL = URL(fileURLWithPath: exp.bundle_path)
+                let totalItems = exp.manifest.counts.memos + exp.manifest.counts.claims + exp.manifest.counts.solutions
+                self.onSuspendAutoDismiss?(true)
+                if let airDrop = NSSharingService(named: .sendViaAirDrop) {
+                    airDrop.perform(withItems: [fileURL])
+                    self.showTemporaryToast("已唤起 AirDrop（含 \(totalItems) 条经验契约）")
+                } else {
+                    NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+                    self.showTemporaryToast("已在访达选中 .noomesh 包，可右键隔空投送")
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    self?.onSuspendAutoDismiss?(false)
+                }
+            }
+        }
+    }
+
+    func pickAndImportBundle() {
+        guard !isBusyAction else { return }
+        onSuspendAutoDismiss?(true)
+        let openPanel = NSOpenPanel()
+        openPanel.title = "选择要导入的 .noomesh 经验包"
+        openPanel.message = "NooMesh 将自动对照本机当前分支源码完成重绑定与符号检定"
+        openPanel.prompt = "导入并检定"
+        openPanel.canChooseFiles = true
+        openPanel.canChooseDirectories = false
+        openPanel.allowsMultipleSelection = false
+        let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        if let downloadsURL = downloadsURL {
+            openPanel.directoryURL = downloadsURL
+        }
+        if let uti = UTType(filenameExtension: "noomesh") {
+            openPanel.allowedContentTypes = [uti, .gzip, .data]
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        let response = openPanel.runModal()
+        onSuspendAutoDismiss?(false)
+        guard response == .OK, let url = openPanel.url else { return }
+        importBundleFile(at: url)
+    }
+
+    func importBundleFile(at url: URL) {
+        guard !isBusyAction else { return }
+        isBusyAction = true
+        toastMessage = "正在对照本机源码重检定并导入 \(url.lastPathComponent)…"
+        let localCLI = cli
+        let ws = snapshot?.primary_workspace
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var args = ["bundle-import", url.path, "--approve"]
+            if let ws = ws, !ws.isEmpty {
+                args += ["--workspace", ws]
+            }
+            let data = localCLI.executeJSON(args)
+            let decoded: BundleImportResponse? = data.flatMap {
+                try? JSONDecoder().decode(BundleImportResponse.self, from: $0)
+            }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isBusyAction = false
+                if let imp = decoded {
+                    self.detailCache.removeAll()
+                    let c = imp.counts
+                    let added = c.imported + c.fast_forwarded
+                    var parts: [String] = ["同步 +\(added) 条"]
+                    if c.applicable > 0 { parts.append("\(c.applicable) 可用") }
+                    if c.soft_drift > 0 { parts.append("\(c.soft_drift) 软漂移") }
+                    if c.branch_mismatch > 0 { parts.append("\(c.branch_mismatch) 跨分支休眠") }
+                    if c.conflicts > 0 { parts.append("\(c.conflicts) 待裁决") }
+                    if added == 0 && c.noop > 0 { parts = ["已是最新（\(c.noop) 条一致）"] }
+                    self.showTemporaryToast("导入完成：" + parts.joined(separator: " · "))
+                    self.refreshNow(allowReorder: true)
+                } else {
+                    self.showTemporaryToast("导入失败：请确认本机已注册对应工作区")
+                }
             }
         }
     }
@@ -2386,21 +2525,33 @@ struct DashboardPopoverView: View {
             Rectangle()
                 .fill(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.45))
                 .frame(height: 0.6)
-            HStack(spacing: 7.5) {
+            HStack(spacing: 5.5) {
                 LiquidCapsuleButton(
-                    title: "知识门户",
+                    title: "门户",
                     systemImage: "safari",
                     disabled: vm.isBusyAction,
                     action: { vm.openPortal() }
                 )
                 LiquidCapsuleButton(
-                    title: "巡检整理",
+                    title: "隔空投送",
+                    systemImage: "airplayaudio",
+                    disabled: vm.isBusyAction,
+                    action: { vm.shareBundleViaAirDrop() }
+                )
+                LiquidCapsuleButton(
+                    title: "导入包",
+                    systemImage: "square.and.arrow.down",
+                    disabled: vm.isBusyAction,
+                    action: { vm.pickAndImportBundle() }
+                )
+                LiquidCapsuleButton(
+                    title: "整理",
                     systemImage: "arrow.triangle.2.circlepath",
                     disabled: vm.isBusyAction,
                     action: { vm.runDreamPass() }
                 )
 
-                Spacer()
+                Spacer(minLength: 2)
 
                 Button(action: { vm.refreshNow(allowReorder: true) }) {
                     Image(systemName: "arrow.clockwise")
@@ -2455,10 +2606,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var viewModel: DashboardViewModel!
     private var globalClickMonitor: Any?
     private var localKeyMonitor: Any?
+    private var suspendAutoDismiss: Bool = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let cli = RuntimeCLI.parseFromCommandLine()
         viewModel = DashboardViewModel(cli: cli)
+        viewModel.onSuspendAutoDismiss = { [weak self] suspended in
+            self?.suspendAutoDismiss = suspended
+        }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
@@ -2584,7 +2739,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self = self, self.panel.isVisible else { return }
+                guard let self = self, self.panel.isVisible, !self.suspendAutoDismiss else { return }
                 let mouseLoc = NSEvent.mouseLocation
                 if let btnFrame = self.statusItem.button?.window?.frame, btnFrame.contains(mouseLoc) {
                     return
@@ -2624,7 +2779,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
+        guard !suspendAutoDismiss else { return }
         closePanel()
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let firstBundle = urls.first(where: { $0.pathExtension.lowercased() == "noomesh" }) else {
+            return
+        }
+        if !panel.isVisible {
+            showPanel()
+        }
+        viewModel.importBundleFile(at: firstBundle)
     }
 }
 

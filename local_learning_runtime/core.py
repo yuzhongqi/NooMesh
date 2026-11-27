@@ -333,6 +333,19 @@ class Store:
                 detail TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY(workspace, kind, subject));
+            CREATE TABLE IF NOT EXISTS doctrine_conflicts (
+                id TEXT PRIMARY KEY,
+                workspace TEXT NOT NULL REFERENCES workspaces(id),
+                kind TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                local_sha256 TEXT NOT NULL,
+                remote_sha256 TEXT NOT NULL,
+                origin_machine TEXT NOT NULL,
+                remote_body TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'PENDING',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS doctrine_conflicts_ws ON doctrine_conflicts(workspace, state);
         """)
         trace_cols = {row["name"] for row in self.db.execute("PRAGMA table_info(tool_traces)")}
         if "detail" not in trace_cols:

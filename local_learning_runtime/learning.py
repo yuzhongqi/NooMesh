@@ -794,6 +794,7 @@ def forget_workspace(store: Store, workspace: str, approve: bool) -> Dict[str, A
         store.db.execute("DELETE FROM memory_events WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM memory_policies WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM token_baselines WHERE workspace=?", (workspace,))
+        store.db.execute("DELETE FROM doctrine_conflicts WHERE workspace=?", (workspace,))
         store.db.execute("DELETE FROM mission_model_calls WHERE mission IN "
                          "(SELECT id FROM missions WHERE workspace=?)", (workspace,))
         store.db.execute("DELETE FROM mission_items WHERE mission IN "

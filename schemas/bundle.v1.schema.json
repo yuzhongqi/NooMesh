@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NooMesh Portable Doctrine Bundle Manifest",
+  "type": "object",
+  "required": [
+    "schema",
+    "format_version",
+    "workspace",
+    "platform",
+    "origin_machine",
+    "exported_at",
+    "counts",
+    "files"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "noomesh.bundle.v1"},
+    "format_version": {"const": 1},
+    "workspace": {"type": "string", "minLength": 1, "maxLength": 120},
+    "platform": {"enum": ["android", "ios", "generic"]},
+    "origin_machine": {"type": "string", "minLength": 1, "maxLength": 120},
+    "exported_at": {"type": "string", "minLength": 10, "maxLength": 64},
+    "include_runtime_claims": {"type": "boolean"},
+    "counts": {
+      "type": "object",
+      "required": ["memos", "claims", "solutions", "themes", "evidence_blobs", "acquisition_tokens"],
+      "additionalProperties": false,
+      "properties": {
+        "memos": {"type": "integer", "minimum": 0},
+        "claims": {"type": "integer", "minimum": 0},
+        "solutions": {"type": "integer", "minimum": 0},
+        "themes": {"type": "integer", "minimum": 0},
+        "evidence_blobs": {"type": "integer", "minimum": 0},
+        "acquisition_tokens": {"type": "integer", "minimum": 0}
+      }
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  }
+}

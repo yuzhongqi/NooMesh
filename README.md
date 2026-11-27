@@ -22,9 +22,9 @@ Most coding-agent "memory" features are invisible, single-vendor prose scratchpa
   - **Epistemic `L2` Ranking**: Ranks candidates by verification strength (`verified solution > active claim/memo > SOFT_DRIFT > BLOCKED warning > unverified legacy > candidate`) within strict UTF-8 byte budgets (`6 KB` default, `12 KB` max).
   - **Lexical Salience Gate (`relevance_score`)**: Blocks single-stopword and generic-filler false positives (`no`, `PR`, `debug`, `fix`, `UI`) so unrelated rules never pollute context or inflate hit metrics.
   - **Noise Stop-Bleeding (`tool_traces`)**: Isolates routine `postToolUse` receipts in a lightweight trace table instead of polluting candidate memory, with `llr prune-noise --approve --vacuum` for instant storage compaction.
-- **Resilient Symbol Anchors & Multi-Mac Re-Attestation**
-  - Separates repo-relative source paths and declared symbols from machine-local checkout paths.
-  - Unrelated edits to an anchored file degrade gracefully to **`SOFT_DRIFT`** (reusable with notice) as long as declared symbols still exist, while missing files or deleted symbols fail closed as **`BLOCKED`**.
+- **Resilient Symbol Anchors & Portable `.noomesh` AirDrop Sharing (`llr bundle-*`)**
+  - Separates repo-relative source paths and declared symbols from machine-local checkout paths, packaging `Memos`, source-anchored `Claims` (+ immutable evidence blobs), `P/R/Q Solutions`, `L1 Themes`, and `acquisition_tokens` baselines into a single deterministic `.noomesh` archive with zero absolute-path or secret leakage.
+  - One-click **AirDrop** share (`NSSharingService(.sendViaAirDrop)`) and `.noomesh` import directly from the macOS Menu Bar HUD: the receiving Mac verifies `manifest.json` `SHA-256` digests, merges content-hash lineages (`NOOP` / `FAST_FORWARDED` / non-destructive `CONFLICT_PENDING`), re-attests anchors against its own local branch (`APPLICABLE` / `SOFT_DRIFT` / `BRANCH_MISMATCH`), and downgrades external-runner contracts until locally re-approved.
 - **Deterministic Offline Consolidation (`llr dream-pass` & Idle Auto-Dream)**
   - Audits symbol-anchor drift, repairs sharded `L1` theme links with optimistic CAS and bloat warnings, and surfaces sanitized `fail -> pass` debugging turnarounds—running with zero LLM calls via CLI, MCP (`local_learning_dream`), or automatically before the Host's 10-minute idle shutdown (`--auto-dream-source`).
 - **Native macOS Liquid Glass Menu Bar HUD (`llr menubar-*`)**
@@ -224,6 +224,22 @@ NooMesh never fabricates arbitrary "tokens saved" numbers:
 2. **Net Marginal Reuse**: `saved_tokens = max(0, acquisition_tokens - injected_tokens)` (`injected_tokens = 0` for zero-model `P/R/Q` executions).
 3. **Shared-Anchor Deduplication**: If a single turn retrieves both a `Memo` and a `Claim` anchored to the same `.kt` / `.py` / `.ts` source files, overlapping source files are counted **once** per turn batch—never double-counted.
 
+#### D. Portable `.noomesh` Doctrine Bundles & Cross-Mac Lineage Merge
+Sharing raw `runtime.sqlite` files across machines leaks absolute paths, overwrites peer discoveries, and bypasses branch verification. Instead, `llr bundle-export` compiles a deterministic, single-file `.noomesh` archive (`manifest.json` + `doctrine/*.json` + `evidence/*.blob`) stripped of machine-local paths, session heartbeats, and runner trust grants:
+
+```mermaid
+flowchart TD
+    EXP["Mac A: llr bundle-export / Menu Bar AirDrop<br/>Packs Memos + Source Claims + P/R/Q + Token Baselines"] --> VER["Mac B: Verify manifest SHA-256,<br/>reject '../' paths & re-sanitize"]
+    VER --> LIN{"Content-Hash Lineage Merge<br/>(content_sha256 + ancestors)"}
+    LIN -->|"Identical digest"| NOOP["NOOP (Idempotent Skip)"]
+    LIN -->|"New item or Local SHA in Remote Ancestors"| FF["IMPORTED / FAST_FORWARDED<br/>Inherit acquisition_tokens baseline"]
+    LIN -->|"Divergent edits on both Macs"| CONF["CONFLICT_PENDING<br/>Preserve Mac B local version + queue conflict"]
+    FF --> ATT{"Re-Attest Against Mac B's<br/>Current Git Checkout"}
+    ATT -->|"Exact SHA-256"| OK["APPLICABLE (+ zero-model P/R/Q active)"]
+    ATT -->|"Edited file, symbols intact"| DRIFT["SOFT_DRIFT (Reusable across branches)"]
+    ATT -->|"Missing file/symbol on Mac B branch"| DORM["BRANCH_MISMATCH (Dormant until branch pulled)"]
+```
+
 ---
 
 ## Essential CLI & MCP Reference
@@ -249,6 +265,12 @@ llr prune-noise --approve --vacuum
 llr search --cwd <path> --query "<task>" --session <session_id>
 llr context --cwd <path> --query "<task>" --session <session_id> --level <0|1|2|3>
 llr route --cwd <path> --query "<exact_task>" --session <session_id>
+
+# Cross-Mac portable .noomesh AirDrop export, inspection, import & conflict check
+llr bundle-export --workspace <workspace> --output ~/Desktop/team-doctrine.noomesh --approve
+llr bundle-inspect ~/Downloads/team-doctrine.noomesh
+llr bundle-import ~/Downloads/team-doctrine.noomesh --workspace <workspace> --approve
+llr bundle-conflicts --workspace <workspace>
 
 # macOS Liquid Glass Menu Bar HUD & offline HTML portal
 llr menubar-start --install-login-agent --approve

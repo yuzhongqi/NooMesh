@@ -332,11 +332,12 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
     hit_events = ("retrieved", "expanded", "selected", "executed")
     today_hits = store.db.execute(
         "SELECT count(*) FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed') "
-        "AND occurred_at >= ?",
+        "AND session != 'bundle-import' AND occurred_at >= ?",
         (day_ago,),
     ).fetchone()[0]
     total_hits = store.db.execute(
-        "SELECT count(*) FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed')"
+        "SELECT count(*) FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed') "
+        "AND session != 'bundle-import'"
     ).fetchone()[0]
 
     # Map session -> latest human task title (prefer descriptive titles over 1-word replies)
@@ -982,11 +983,12 @@ def menubar_hits_detail(store: Store, hours: int = 24) -> Dict[str, Any]:
     gas = tok_eval["gas_gauge"]
 
     total_hits = int(store.db.execute(
-        "SELECT count(*) FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed')"
+        "SELECT count(*) FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed') "
+        "AND session != 'bundle-import'"
     ).fetchone()[0] or 0)
     window_hits = int(store.db.execute(
         "SELECT count(*) FROM memory_events WHERE event IN ('retrieved','expanded','selected','executed') "
-        "AND occurred_at >= ?",
+        "AND session != 'bundle-import' AND occurred_at >= ?",
         (cutoff_iso,),
     ).fetchone()[0] or 0)
 
@@ -1301,6 +1303,12 @@ def build_macos_menubar_app(home: Path, runtime_root: Optional[Path] = None) -> 
         "LSMinimumSystemVersion": "13.0",
         "LSUIElement": True,
         "NSHighResolutionCapable": True,
+        "CFBundleDocumentTypes": [{
+            "CFBundleTypeName": "NooMesh Portable Doctrine Bundle",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Owner",
+            "CFBundleTypeExtensions": ["noomesh"],
+        }],
     }
     info_plist.write_bytes(plistlib.dumps(plist_data))
     if binary.is_file() and os.access(binary, os.X_OK) and stamp_file.is_file():
