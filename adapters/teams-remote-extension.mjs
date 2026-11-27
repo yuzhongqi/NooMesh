@@ -223,6 +223,18 @@ const session = await joinSession({
             currentSessionId = sid;
             if (input?.workingDirectory) currentWorkingDirectory = input.workingDirectory;
             currentState = "idle";
+            runLlr([
+                "inbox-heartbeat",
+                "--session",
+                sid,
+                "--client",
+                "copilot",
+                "--cwd",
+                currentWorkingDirectory,
+                "--state",
+                "idle",
+                "--heartbeat-only",
+            ]).catch(() => {});
             try {
                 const cfg = await runLlr(["relay-register", "--session", sid]);
                 if (!cfg?.configured || !cfg?.enabled || !cfg?.auto_on_stop) return;
@@ -313,8 +325,6 @@ async function tickProactiveHeartbeat() {
             "copilot",
             "--cwd",
             currentWorkingDirectory,
-            "--title",
-            currentTitle,
             "--state",
             currentState,
         ];

@@ -90,7 +90,8 @@ def configure_inbox(store: Store, approve: bool,
 
 def register_live_session(store: Store, session: str, client: str = "copilot",
                           cwd: str = "", title: str = "",
-                          state: str = "idle") -> Dict[str, Any]:
+                          state: str = "idle",
+                          touch_activity: bool = False) -> Dict[str, Any]:
     require(isinstance(session, str) and 1 <= len(session) <= 128, "Invalid session ID")
     key = privacy_key(store)
     safe_cwd = str(Path(cwd).expanduser().resolve()) if cwd and Path(cwd).expanduser().exists() else str(cwd)[:240]
@@ -101,20 +102,28 @@ def register_live_session(store: Store, session: str, client: str = "copilot",
     safe_title = sanitize(str(title)[:120], key)[0] if (
         title and not str(title).lstrip().startswith("<system_notification>")
     ) else ""
+    clean_state = str(state)[:24]
     ts = now()
     with store.transaction():
-        old = store.db.execute("SELECT cwd,workspace,title,updated_at FROM live_sessions WHERE session=?",
-                               (session,)).fetchone()
+        old = store.db.execute(
+            "SELECT cwd,workspace,title,state,updated_at FROM live_sessions WHERE session=?",
+            (session,),
+        ).fetchone()
         final_cwd = safe_cwd or (old["cwd"] if old else "")
         final_ws = ws or (old["workspace"] if old else None)
         final_title = safe_title or (old["title"] if old else "")
-        final_updated = ts if title else (old["updated_at"] if old else ts)
+        if old is None:
+            final_updated = ts
+        elif touch_activity or clean_state != old["state"] or (bool(safe_title) and safe_title != old["title"]):
+            final_updated = ts
+        else:
+            final_updated = old["updated_at"]
         store.db.execute(
             "INSERT INTO live_sessions VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(session) DO UPDATE SET "
             "client=excluded.client,cwd=excluded.cwd,workspace=excluded.workspace,"
             "title=excluded.title,state=excluded.state,heartbeat_at=excluded.heartbeat_at,"
             "updated_at=excluded.updated_at",
-            (session, str(client)[:24], final_cwd, final_ws, final_title, str(state)[:24], ts, final_updated),
+            (session, str(client)[:24], final_cwd, final_ws, final_title, clean_state, ts, final_updated),
         )
         store.db.execute(
             "INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

@@ -235,7 +235,7 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
     for row in store.db.execute(
         "SELECT id,session,workspace,kind,subject,event,occurred_at FROM memory_events "
         "WHERE event IN ('retrieved','expanded','selected','executed') "
-        "ORDER BY occurred_at DESC LIMIT 200"
+        "ORDER BY occurred_at DESC, id ASC LIMIT 200"
     ):
         sid = row["session"]
         items = session_knowledge.setdefault(sid, [])
@@ -264,12 +264,15 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             "acquisition_formatted": format_tokens(acq_val),
         })
 
-    # Live open sessions (heartbeat within 90s; fallback to recent task_runs if empty)
+    # Live open sessions: filter heartbeat freshness BEFORE sorting/limiting, and sort deterministically
+    # by active state -> last real interaction (updated_at) -> session ID (never by jittery heartbeat_at!).
+    hb_cutoff_iso = (clock - timedelta(seconds=90)).isoformat()
     sessions_out: List[Dict[str, Any]] = []
     seen_sessions = set()
     for row in store.db.execute(
-        "SELECT * FROM live_sessions ORDER BY CASE WHEN state='active' THEN 0 ELSE 1 END, "
-        "heartbeat_at DESC LIMIT 12"
+        "SELECT * FROM live_sessions WHERE heartbeat_at >= ? "
+        "ORDER BY CASE WHEN state='active' THEN 0 ELSE 1 END, updated_at DESC, session ASC LIMIT 20",
+        (hb_cutoff_iso,),
     ):
         hb = parsed(row["heartbeat_at"])
         if not hb or (clock - hb).total_seconds() > 90:
@@ -298,7 +301,7 @@ def menubar_snapshot(store: Store) -> Dict[str, Any]:
             "saved_formatted": format_tokens(sess_saved),
             "updated_ago": relative_time_zh(row["updated_at"], clock),
         })
-        if len(sessions_out) >= 6:
+        if len(sessions_out) >= 20:
             break
 
     active_running_count = sum(1 for s in sessions_out if s["state"] == "active")

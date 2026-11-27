@@ -320,6 +320,44 @@ class MenuBarDashboardTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(remaining, 0)
 
+    def test_live_sessions_order_stays_stable_across_out_of_order_heartbeats(self):
+        import time
+        # Register 8 idle sessions sequentially so each has a distinct initial updated_at.
+        session_ids = [f"sess-order-{i:02d}" for i in range(8)]
+        for idx, sid in enumerate(session_ids):
+            register_live_session(
+                self.store, sid, "copilot", str(self.android_repo),
+                f"Task description number {idx}", state="idle",
+            )
+            time.sleep(0.002)
+
+        baseline_order = [s["session"] for s in menubar_snapshot(self.store)["live_sessions"]]
+        # All 8 open sessions are returned (no 6-item thrashing), newest first.
+        self.assertEqual(len(baseline_order), 8)
+        self.assertEqual(baseline_order, list(reversed(session_ids)))
+
+        # Simulate background heartbeats arriving in scrambled/reverse order WITH unchanged titles!
+        for sid in [session_ids[0], session_ids[3], session_ids[1], session_ids[5], session_ids[2]]:
+            idx = int(sid.split("-")[-1])
+            register_live_session(
+                self.store, sid, "copilot", str(self.android_repo),
+                f"Task description number {idx}", state="idle",
+            )
+            time.sleep(0.002)
+
+        after_hb_order = [s["session"] for s in menubar_snapshot(self.store)["live_sessions"]]
+        self.assertEqual(after_hb_order, baseline_order)
+
+        # Submitting a genuinely new user prompt in sess-order-00 promotes ONLY sess-order-00 to #1.
+        hook(self.store, "copilot", "userPromptSubmitted", {
+            "sessionId": "sess-order-00",
+            "cwd": str(self.android_repo),
+            "prompt": "Brand new user task in session 00",
+        })
+        promoted_order = [s["session"] for s in menubar_snapshot(self.store)["live_sessions"]]
+        self.assertEqual(promoted_order[0], "sess-order-00")
+        self.assertEqual(promoted_order[1:], [s for s in baseline_order if s != "sess-order-00"])
+
 
 if __name__ == "__main__":
     unittest.main()

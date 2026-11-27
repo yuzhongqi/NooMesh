@@ -6,7 +6,7 @@ import SwiftUI
 
 // MARK: - Snapshot Models
 
-struct HostStatusSnapshot: Decodable {
+struct HostStatusSnapshot: Decodable, Equatable {
     let online: Bool
     let pid: Int?
     let auto_dream: Bool
@@ -14,7 +14,7 @@ struct HostStatusSnapshot: Decodable {
     let teams_inbox: Bool
 }
 
-struct TotalsSnapshot: Decodable {
+struct TotalsSnapshot: Decodable, Equatable {
     let today_hits: Int
     let total_hits: Int
     let memos: Int
@@ -25,7 +25,7 @@ struct TotalsSnapshot: Decodable {
     let active_sessions: Int
 }
 
-struct GasGaugeSnapshot: Decodable {
+struct GasGaugeSnapshot: Decodable, Equatable {
     let total_saved_tokens: Int
     let total_saved_formatted: String
     let today_saved_tokens: Int
@@ -40,7 +40,7 @@ struct GasGaugeSnapshot: Decodable {
     let next_milestone_formatted: String
 }
 
-struct SessionKnowledgeItem: Decodable, Identifiable {
+struct SessionKnowledgeItem: Decodable, Identifiable, Equatable {
     var id: String { "\(kind):\(subject)" }
     let kind: String
     let subject: String
@@ -54,7 +54,7 @@ struct SessionKnowledgeItem: Decodable, Identifiable {
     let acquisition_formatted: String?
 }
 
-struct LiveSessionItem: Decodable, Identifiable {
+struct LiveSessionItem: Decodable, Identifiable, Equatable {
     var id: String { session }
     let session: String
     let session_short: String
@@ -69,7 +69,7 @@ struct LiveSessionItem: Decodable, Identifiable {
     let updated_ago: String
 }
 
-struct ActivityFeedItem: Decodable, Identifiable {
+struct ActivityFeedItem: Decodable, Identifiable, Equatable {
     let id: String
     let event_type: String
     let kind: String
@@ -87,7 +87,7 @@ struct ActivityFeedItem: Decodable, Identifiable {
     let token_badge: String?
 }
 
-struct MenuBarSnapshot: Decodable {
+struct MenuBarSnapshot: Decodable, Equatable {
     let schema: String
     let updated_at: String
     let machine_name: String
@@ -97,8 +97,21 @@ struct MenuBarSnapshot: Decodable {
     let host: HostStatusSnapshot
     let totals: TotalsSnapshot
     let gas_gauge: GasGaugeSnapshot
-    let live_sessions: [LiveSessionItem]
+    var live_sessions: [LiveSessionItem]
     let recent_activity: [ActivityFeedItem]
+
+    func hasSameVisibleContent(as other: MenuBarSnapshot?) -> Bool {
+        guard let other = other else { return false }
+        return machine_name == other.machine_name
+            && primary_workspace == other.primary_workspace
+            && just_hit_knowledge == other.just_hit_knowledge
+            && last_hit_ago == other.last_hit_ago
+            && host == other.host
+            && totals == other.totals
+            && gas_gauge == other.gas_gauge
+            && live_sessions == other.live_sessions
+            && recent_activity == other.recent_activity
+    }
 }
 
 struct KnowledgeDetailSection: Decodable, Identifiable {
@@ -314,6 +327,7 @@ final class DashboardViewModel: ObservableObject {
     private var timer: Timer?
     private var fetchInFlight = false
     private var detailCache: [String: KnowledgeItemDetail] = [:]
+    private var pinnedSessionOrder: [String] = []
 
     var isShowingDetail: Bool {
         selectedRef != nil
@@ -324,16 +338,18 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func startPolling() {
-        refreshNow()
+        refreshNow(allowReorder: true)
         scheduleTimer(interval: 8.0)
     }
 
     func setPopoverVisible(_ visible: Bool) {
         popoverVisible = visible
         if visible {
-            refreshNow()
+            pinnedSessionOrder.removeAll()
+            refreshNow(allowReorder: true)
             scheduleTimer(interval: 2.5)
         } else {
+            pinnedSessionOrder.removeAll()
             scheduleTimer(interval: 8.0)
         }
     }
@@ -342,12 +358,38 @@ final class DashboardViewModel: ObservableObject {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.refreshNow()
+                guard let self = self else { return }
+                self.refreshNow(allowReorder: !self.popoverVisible)
             }
         }
     }
 
-    func refreshNow() {
+    private func stabilizeSessionOrder(_ incoming: [LiveSessionItem], allowReorder: Bool) -> [LiveSessionItem] {
+        if allowReorder || pinnedSessionOrder.isEmpty {
+            pinnedSessionOrder = incoming.map(\.session)
+            return incoming
+        }
+        var byId: [String: LiveSessionItem] = [:]
+        for item in incoming {
+            byId[item.session] = item
+        }
+        var ordered: [LiveSessionItem] = []
+        var keptIds: [String] = []
+        for sid in pinnedSessionOrder {
+            if let existing = byId.removeValue(forKey: sid) {
+                ordered.append(existing)
+                keptIds.append(sid)
+            }
+        }
+        for item in incoming where byId[item.session] != nil {
+            ordered.append(item)
+            keptIds.append(item.session)
+        }
+        pinnedSessionOrder = keptIds
+        return ordered
+    }
+
+    func refreshNow(allowReorder: Bool = true) {
         guard !fetchInFlight else { return }
         fetchInFlight = true
         let localCLI = cli
@@ -367,9 +409,19 @@ final class DashboardViewModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.fetchInFlight = false
-                if let decoded = decoded {
-                    self.snapshot = decoded
+                if var decoded = decoded {
+                    decoded.live_sessions = self.stabilizeSessionOrder(
+                        decoded.live_sessions,
+                        allowReorder: allowReorder
+                    )
                     self.onStatusBarChange?(decoded)
+                    if !decoded.hasSameVisibleContent(as: self.snapshot) {
+                        var txn = Transaction()
+                        txn.disablesAnimations = true
+                        withTransaction(txn) {
+                            self.snapshot = decoded
+                        }
+                    }
                 }
                 if let refreshedHits = refreshedHits {
                     self.hitsReport = refreshedHits
@@ -2217,7 +2269,7 @@ struct DashboardPopoverView: View {
 
                 Spacer()
 
-                Button(action: { vm.refreshNow() }) {
+                Button(action: { vm.refreshNow(allowReorder: true) }) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(GlassPalette.secondaryLabel)

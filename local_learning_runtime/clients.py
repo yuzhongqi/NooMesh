@@ -54,11 +54,12 @@ def hook(store: Store, client: str, event: str, payload: Dict[str, Any],
             "Client did not supply stable session ID/cwd; event not recorded")
     prompt = payload.get("prompt") or payload.get("initialPrompt") or payload.get("initial_prompt")
     prompt_text = prompt[:2000] if isinstance(prompt, str) else ""
-    if event in ("sessionStart", "userPromptSubmitted", "agentStop"):
+    if event in ("sessionStart", "userPromptSubmitted", "postToolUse", "agentStop"):
         register_live_session(
             store, session, client=client, cwd=cwd,
             title=prompt_text if event == "userPromptSubmitted" else "",
-            state="idle" if event == "agentStop" else "active",
+            state="idle" if event in ("sessionStart", "agentStop") else "active",
+            touch_activity=(event == "userPromptSubmitted"),
         )
     if event == "userPromptSubmitted" and client in ("codex", "codex-hooks"):
         set_codex_remote_turn(store, session, False)
