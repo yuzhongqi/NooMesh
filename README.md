@@ -28,7 +28,7 @@ Most coding-agent "memory" features are invisible, single-vendor prose scratchpa
 - **Deterministic Offline Consolidation (`llr dream-pass` & Idle Auto-Dream)**
   - Audits symbol-anchor drift, repairs sharded `L1` theme links with optimistic CAS and bloat warnings, and surfaces sanitized `fail -> pass` debugging turnarounds—running with zero LLM calls via CLI, MCP (`local_learning_dream`), or automatically before the Host's 10-minute idle shutdown (`--auto-dream-source`).
 - **Native macOS Liquid Glass Menu Bar HUD (`llr menubar-*`)**
-  - Standalone zero-Dock-icon AppKit + SwiftUI floating glass panel (`NSGlassEffectView` on macOS 26+ with `NSVisualEffectView` fallback, crowned by a custom **Iron-Halo & Astral Star-Cog** template emblem).
+  - Standalone zero-Dock-icon AppKit + SwiftUI floating glass panel (`NSGlassEffectView` on macOS 26+ with `NSVisualEffectView` fallback, crowned by a custom **Throne-Crown, Doctrine-Tome & Contract-Cog** template emblem).
   - Displays stable, anti-jitter **Active Session Tasks** (auto-extracting clean titles from Copilot/Codex metadata and compacting PR/Bug/IcM URLs), exact local doctrine invoked per session, chronological learning/hit feeds, **click-to-inspect full doctrine detail** with one-click Markdown copy and *Open in VS Code* source links, plus one-click offline HTML portal export and `dream-pass` triggers.
   - Queries SQLite read-only and checks `host-owner.lock` via non-blocking `flock` so UI refreshes never wake a sleeping Host or reset its idle timer.
 - **Token Savings Gas Gauge & Per-Item Ledger**

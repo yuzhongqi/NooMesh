@@ -740,127 +740,156 @@ final class DashboardViewModel: ObservableObject {
     }
 }
 
-// MARK: - Custom NooMesh Iron-Halo & Astral Star-Cog Vector Glyph
+// MARK: - Custom NooMesh Throne-Crown, Doctrine-Tome & Contract-Cog Vector Glyph
+
+private struct NooMeshEmblemPaths {
+    let solid: CGPath
+    let tomeWithLines: CGPath
+    let haloCutout: CGPath
+    let star: CGPath
+
+    static func build(size sz: CGSize) -> NooMeshEmblemPaths {
+        let w = sz.width
+        let h = sz.height
+        let cx = w * 0.5
+        let cy = h * 0.54
+
+        let solid = CGMutablePath()
+
+        // 1. Top Emperor's Golden Throne 3-Spire Crown
+        let crownOriginY = cy - h * 0.03
+        let rays: [(Double, CGFloat, CGFloat, CGFloat)] = [
+            (-90.0, h * 0.16, h * 0.47, w * 0.084),
+            (-54.0, h * 0.18, h * 0.38, w * 0.060),
+            (-126.0, h * 0.18, h * 0.38, w * 0.060)
+        ]
+        for (deg, r1, r2, bw) in rays {
+            let rad = deg * .pi / 180.0
+            let perp = rad + .pi / 2.0
+            let b = CGPoint(x: cx + CGFloat(cos(rad)) * r1, y: crownOriginY + CGFloat(sin(rad)) * r1)
+            let tip = CGPoint(x: cx + CGFloat(cos(rad)) * r2, y: crownOriginY + CGFloat(sin(rad)) * r2)
+            solid.move(to: CGPoint(x: b.x + CGFloat(cos(perp)) * bw * 0.5, y: b.y + CGFloat(sin(perp)) * bw * 0.5))
+            solid.addLine(to: tip)
+            solid.addLine(to: CGPoint(x: b.x - CGFloat(cos(perp)) * bw * 0.5, y: b.y - CGFloat(sin(perp)) * bw * 0.5))
+            solid.closeSubpath()
+        }
+
+        // 2. Right Side — Machine-Executable Contract Half-Cog
+        let rCenter = CGPoint(x: cx + w * 0.03, y: cy + h * 0.06)
+        let cogOuter = min(w, h) * 0.43
+        let cogRoot = cogOuter * 0.74
+        let cogInner = cogOuter * 0.46
+        solid.move(to: CGPoint(x: rCenter.x + w * 0.07, y: rCenter.y - cogRoot * 0.94))
+        for deg in [-56.0, -18.0, 20.0, 58.0] {
+            let a1 = (deg - 11.5) * .pi / 180.0
+            let a2 = (deg - 8.5) * .pi / 180.0
+            let a3 = (deg + 8.5) * .pi / 180.0
+            let a4 = (deg + 11.5) * .pi / 180.0
+            solid.addLine(to: CGPoint(x: rCenter.x + CGFloat(cos(a1)) * cogRoot, y: rCenter.y + CGFloat(sin(a1)) * cogRoot))
+            solid.addLine(to: CGPoint(x: rCenter.x + CGFloat(cos(a2)) * cogOuter, y: rCenter.y + CGFloat(sin(a2)) * cogOuter))
+            solid.addLine(to: CGPoint(x: rCenter.x + CGFloat(cos(a3)) * cogOuter, y: rCenter.y + CGFloat(sin(a3)) * cogOuter))
+            solid.addLine(to: CGPoint(x: rCenter.x + CGFloat(cos(a4)) * cogRoot, y: rCenter.y + CGFloat(sin(a4)) * cogRoot))
+        }
+        solid.addLine(to: CGPoint(x: rCenter.x + w * 0.07, y: rCenter.y + cogRoot * 0.94))
+        solid.addLine(to: CGPoint(x: rCenter.x + w * 0.07, y: rCenter.y + cogInner * 0.92))
+        for deg in stride(from: 72.0, through: -72.0, by: -9.0) {
+            let rad = deg * .pi / 180.0
+            solid.addLine(to: CGPoint(x: rCenter.x + CGFloat(cos(rad)) * cogInner, y: rCenter.y + CGFloat(sin(rad)) * cogInner))
+        }
+        solid.closeSubpath()
+
+        // 3. Central Spine — Golden Throne Pillar & Pedestal
+        let spineW = max(1.5, w * 0.085)
+        solid.addRoundedRect(
+            in: CGRect(x: cx - spineW * 0.5, y: cy - h * 0.16, width: spineW, height: h * 0.52),
+            cornerWidth: spineW * 0.4,
+            cornerHeight: spineW * 0.4
+        )
+        solid.move(to: CGPoint(x: cx - w * 0.13, y: cy + h * 0.38))
+        solid.addLine(to: CGPoint(x: cx + w * 0.13, y: cy + h * 0.38))
+        solid.addLine(to: CGPoint(x: cx + w * 0.07, y: cy + h * 0.31))
+        solid.addLine(to: CGPoint(x: cx - w * 0.07, y: cy + h * 0.31))
+        solid.closeSubpath()
+
+        // 4. Left Side — Open Illuminated Doctrine Tome Page with 2 Negative-Space Lines
+        let tome = CGMutablePath()
+        tome.move(to: CGPoint(x: cx - w * 0.11, y: cy - h * 0.14))
+        tome.addQuadCurve(to: CGPoint(x: cx - w * 0.46, y: cy - h * 0.10), control: CGPoint(x: cx - w * 0.28, y: cy - h * 0.18))
+        tome.addLine(to: CGPoint(x: cx - w * 0.42, y: cy + h * 0.25))
+        tome.addQuadCurve(to: CGPoint(x: cx - w * 0.11, y: cy + h * 0.27), control: CGPoint(x: cx - w * 0.26, y: cy + h * 0.22))
+        tome.closeSubpath()
+
+        let lineH = max(1.0, h * 0.054)
+        for ly in [cy - h * 0.01, cy + h * 0.10] {
+            tome.addRoundedRect(
+                in: CGRect(x: cx - w * 0.37, y: ly - lineH * 0.5, width: w * 0.20, height: lineH),
+                cornerWidth: lineH * 0.5,
+                cornerHeight: lineH * 0.5
+            )
+        }
+
+        // 5. Central Halo Cutout & Unified Session Astral Spark
+        let corePt = CGPoint(x: cx, y: cy + h * 0.06)
+        let haloR = min(w, h) * 0.165
+        let halo = CGMutablePath()
+        halo.addEllipse(in: CGRect(x: corePt.x - haloR, y: corePt.y - haloR, width: haloR * 2.0, height: haloR * 2.0))
+
+        let d = haloR * 0.82
+        let k = d * 0.28
+        let star = CGMutablePath()
+        star.move(to: CGPoint(x: corePt.x, y: corePt.y - d))
+        star.addQuadCurve(to: CGPoint(x: corePt.x + d, y: corePt.y), control: CGPoint(x: corePt.x + k, y: corePt.y - k))
+        star.addQuadCurve(to: CGPoint(x: corePt.x, y: corePt.y + d), control: CGPoint(x: corePt.x + k, y: corePt.y + k))
+        star.addQuadCurve(to: CGPoint(x: corePt.x - d, y: corePt.y), control: CGPoint(x: corePt.x - k, y: corePt.y + k))
+        star.addQuadCurve(to: CGPoint(x: corePt.x, y: corePt.y - d), control: CGPoint(x: corePt.x - k, y: corePt.y - k))
+        star.closeSubpath()
+
+        return NooMeshEmblemPaths(solid: solid, tomeWithLines: tome, haloCutout: halo, star: star)
+    }
+}
 
 struct NooMeshGlyphView: View {
     let size: CGFloat
 
     var body: some View {
         Canvas { ctx, sz in
-            let c = CGPoint(x: sz.width / 2.0, y: sz.height / 2.0)
-            let outerR = min(sz.width, sz.height) * 0.48
-            let cogR = outerR * 0.82
-            let rootR = outerR * 0.66
-            let holeR = outerR * 0.49
-
-            // 1. Alternating 4 Cardinal Iron-Halo Spires + 4 Diagonal Forge-Cog Teeth
-            var halo = Path()
-            let total = 8
-            let step = (2.0 * Double.pi) / Double(total)
-            for i in 0..<total {
-                let base = Double(i) * step - Double.pi / 2.0
-                if i % 2 == 0 {
-                    let w = step * 0.21
-                    let p1 = CGPoint(x: c.x + CGFloat(cos(base - w)) * rootR, y: c.y + CGFloat(sin(base - w)) * rootR)
-                    let tip = CGPoint(x: c.x + CGFloat(cos(base)) * outerR, y: c.y + CGFloat(sin(base)) * outerR)
-                    let p2 = CGPoint(x: c.x + CGFloat(cos(base + w)) * rootR, y: c.y + CGFloat(sin(base + w)) * rootR)
-                    if i == 0 { halo.move(to: p1) } else { halo.addLine(to: p1) }
-                    halo.addLine(to: tip)
-                    halo.addLine(to: p2)
-                } else {
-                    let w = step * 0.23
-                    let b = step * 0.05
-                    let p1 = CGPoint(x: c.x + CGFloat(cos(base - w - b)) * rootR, y: c.y + CGFloat(sin(base - w - b)) * rootR)
-                    let p2 = CGPoint(x: c.x + CGFloat(cos(base - w)) * cogR, y: c.y + CGFloat(sin(base - w)) * cogR)
-                    let p3 = CGPoint(x: c.x + CGFloat(cos(base + w)) * cogR, y: c.y + CGFloat(sin(base + w)) * cogR)
-                    let p4 = CGPoint(x: c.x + CGFloat(cos(base + w + b)) * rootR, y: c.y + CGFloat(sin(base + w + b)) * rootR)
-                    halo.addLine(to: p1)
-                    halo.addLine(to: p2)
-                    halo.addLine(to: p3)
-                    halo.addLine(to: p4)
-                }
+            let parts = NooMeshEmblemPaths.build(size: sz)
+            ctx.drawLayer { layer in
+                layer.fill(Path(parts.solid), with: .foreground)
+                layer.fill(Path(parts.tomeWithLines), with: .foreground, style: FillStyle(eoFill: true))
+                layer.blendMode = .destinationOut
+                layer.fill(Path(parts.haloCutout), with: .color(.black))
+                layer.blendMode = .normal
+                layer.fill(Path(parts.star), with: .foreground)
             }
-            halo.closeSubpath()
-            halo.addEllipse(in: CGRect(x: c.x - holeR, y: c.y - holeR, width: holeR * 2.0, height: holeR * 2.0))
-            ctx.fill(halo, with: .foreground, style: FillStyle(eoFill: true))
-
-            // 2. Central 4-Point Astral Noosphere Spark
-            let d = holeR * 0.62
-            let k = d * 0.28
-            var star = Path()
-            star.move(to: CGPoint(x: c.x, y: c.y - d))
-            star.addQuadCurve(to: CGPoint(x: c.x + d, y: c.y), control: CGPoint(x: c.x + k, y: c.y - k))
-            star.addQuadCurve(to: CGPoint(x: c.x, y: c.y + d), control: CGPoint(x: c.x + k, y: c.y + k))
-            star.addQuadCurve(to: CGPoint(x: c.x - d, y: c.y), control: CGPoint(x: c.x - k, y: c.y + k))
-            star.addQuadCurve(to: CGPoint(x: c.x, y: c.y - d), control: CGPoint(x: c.x - k, y: c.y - k))
-            star.closeSubpath()
-            ctx.fill(star, with: .foreground)
         }
-        .frame(width: size, height: size)
+        .frame(width: size * 1.12, height: size)
     }
 }
 
 func makeNooMeshStatusBarImage(pointSize: CGFloat = 18.5) -> NSImage {
-    let size = NSSize(width: pointSize, height: pointSize)
+    let size = NSSize(width: round(pointSize * 1.12 * 2.0) / 2.0, height: pointSize)
     let image = NSImage(size: size, flipped: true) { rect in
-        let c = NSPoint(x: rect.midX, y: rect.midY)
-        let outerR = min(rect.width, rect.height) * 0.48
-        let cogR = outerR * 0.82
-        let rootR = outerR * 0.66
-        let holeR = outerR * 0.49
+        guard let cg = NSGraphicsContext.current?.cgContext else { return false }
+        let parts = NooMeshEmblemPaths.build(size: rect.size)
 
-        NSColor.black.setFill()
+        cg.beginTransparencyLayer(auxiliaryInfo: nil)
+        cg.setFillColor(NSColor.black.cgColor)
+        cg.addPath(parts.solid)
+        cg.fillPath()
 
-        let halo = NSBezierPath()
-        halo.windingRule = .evenOdd
-        let total = 8
-        let step = (2.0 * Double.pi) / Double(total)
-        for i in 0..<total {
-            let base = Double(i) * step - Double.pi / 2.0
-            if i % 2 == 0 {
-                let w = step * 0.21
-                let p1 = NSPoint(x: c.x + CGFloat(cos(base - w)) * rootR, y: c.y + CGFloat(sin(base - w)) * rootR)
-                let tip = NSPoint(x: c.x + CGFloat(cos(base)) * outerR, y: c.y + CGFloat(sin(base)) * outerR)
-                let p2 = NSPoint(x: c.x + CGFloat(cos(base + w)) * rootR, y: c.y + CGFloat(sin(base + w)) * rootR)
-                if i == 0 { halo.move(to: p1) } else { halo.line(to: p1) }
-                halo.line(to: tip)
-                halo.line(to: p2)
-            } else {
-                let w = step * 0.23
-                let b = step * 0.05
-                let p1 = NSPoint(x: c.x + CGFloat(cos(base - w - b)) * rootR, y: c.y + CGFloat(sin(base - w - b)) * rootR)
-                let p2 = NSPoint(x: c.x + CGFloat(cos(base - w)) * cogR, y: c.y + CGFloat(sin(base - w)) * cogR)
-                let p3 = NSPoint(x: c.x + CGFloat(cos(base + w)) * cogR, y: c.y + CGFloat(sin(base + w)) * cogR)
-                let p4 = NSPoint(x: c.x + CGFloat(cos(base + w + b)) * rootR, y: c.y + CGFloat(sin(base + w + b)) * rootR)
-                halo.line(to: p1)
-                halo.line(to: p2)
-                halo.line(to: p3)
-                halo.line(to: p4)
-            }
-        }
-        halo.close()
-        halo.appendOval(in: NSRect(x: c.x - holeR, y: c.y - holeR, width: holeR * 2.0, height: holeR * 2.0))
-        halo.fill()
+        cg.addPath(parts.tomeWithLines)
+        cg.fillPath(using: .evenOdd)
 
-        let d = holeR * 0.62
-        let k = d * 0.28
-        func addQuad(_ path: NSBezierPath, from p0: NSPoint, to p1: NSPoint, control ctrl: NSPoint) {
-            let cp1 = NSPoint(x: p0.x + (2.0 / 3.0) * (ctrl.x - p0.x), y: p0.y + (2.0 / 3.0) * (ctrl.y - p0.y))
-            let cp2 = NSPoint(x: p1.x + (2.0 / 3.0) * (ctrl.x - p1.x), y: p1.y + (2.0 / 3.0) * (ctrl.y - p1.y))
-            path.curve(to: p1, controlPoint1: cp1, controlPoint2: cp2)
-        }
-        let top = NSPoint(x: c.x, y: c.y - d)
-        let right = NSPoint(x: c.x + d, y: c.y)
-        let bottom = NSPoint(x: c.x, y: c.y + d)
-        let left = NSPoint(x: c.x - d, y: c.y)
-        let star = NSBezierPath()
-        star.move(to: top)
-        addQuad(star, from: top, to: right, control: NSPoint(x: c.x + k, y: c.y - k))
-        addQuad(star, from: right, to: bottom, control: NSPoint(x: c.x + k, y: c.y + k))
-        addQuad(star, from: bottom, to: left, control: NSPoint(x: c.x - k, y: c.y + k))
-        addQuad(star, from: left, to: top, control: NSPoint(x: c.x - k, y: c.y - k))
-        star.close()
-        star.fill()
+        cg.setBlendMode(.destinationOut)
+        cg.addPath(parts.haloCutout)
+        cg.fillPath()
+
+        cg.setBlendMode(.normal)
+        cg.setFillColor(NSColor.black.cgColor)
+        cg.addPath(parts.star)
+        cg.fillPath()
+        cg.endTransparencyLayer()
         return true
     }
     image.isTemplate = true
@@ -2409,7 +2438,7 @@ struct DashboardPopoverView: View {
                             color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.07),
                             radius: 4, x: 0, y: 2
                         )
-                    NooMeshGlyphView(size: 22)
+                    NooMeshGlyphView(size: 20.5)
                         .foregroundColor(GlassPalette.primaryLabel)
                 }
 
